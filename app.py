@@ -1,7 +1,7 @@
 import os
 import time
 import requests
-from FastAPI import FastAPI
+from fastapi import FastAPI
 import uvicorn
 import threading
 
@@ -67,10 +67,9 @@ def get_token_mint_from_tx(signature: str) -> str:
     return ""
 
 def check_momentum_and_liquidity(mint_address: str) -> dict:
-    """فحص دقيق للسيولة والزخم (عدد الصفقات وحجم الشراء) لاستبعاد العملات الميتة"""
+    """فحص دقيق للسيولة والزخم لاستبعاد العملات الميتة"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{mint_address}"
     
-    # نعطي محاولات قصيرة بانتظار تحديث المؤشرات من الدكس سكرينير
     for _ in range(3):
         try:
             res = requests.get(url, timeout=5)
@@ -78,12 +77,11 @@ def check_momentum_and_liquidity(mint_address: str) -> dict:
                 data = res.json()
                 pairs = data.get("pairs", [])
                 if pairs:
-                    sol_pairs = [p for p in pairs if p.get("chainId"] == "solana"]
+                    sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
                     if sol_pairs:
                         pair = sol_pairs[0]
                         liq = pair.get("liquidity", {}).get("usd", 0)
                         
-                        # الحصول على معلومات حجم التداول والصفقات (شراء/بيع) خلال آخر ساعة أو 5 دقائق
                         txns = pair.get("txns", {})
                         h1_txns = txns.get("h1", {})
                         buys = h1_txns.get("buys", 0)
@@ -91,7 +89,6 @@ def check_momentum_and_liquidity(mint_address: str) -> dict:
                         
                         h1_volume = pair.get("volume", {}).get("h1", 0)
                         
-                        # شرط الزخم: يجب أن تحتوي على سيولة أكبر من الصفر ولديها عمليات شراء فعلية (حركة نشطة)
                         if liq > 500 and buys > 0:
                             return {
                                 "is_active": True,
@@ -142,7 +139,6 @@ def fetch_latest_pump_tokens():
                     if not mint_address:
                         return
                     
-                    # فحص الزخم والسيولة الشرائية
                     metrics = check_momentum_and_liquidity(mint_address)
                     
                     if metrics.get("is_active"):
