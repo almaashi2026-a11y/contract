@@ -13,14 +13,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Second-One High Liquidity & Strong Buy Sniper Active..."
+    "last_event": "Professional Smart Money Hunter Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Second-One Strong Flow & Liquidity Sniper",
+        "engine": "Professional Smart Money Hunter & Second-One Sniper",
         "details": engine_status
     }
 
@@ -42,7 +42,7 @@ def send_telegram_alert(message: str):
 processed_tokens = set()
 
 def get_token_mint_from_solana_tx(signature: str) -> str:
-    """استخراج عنوان التوكن من معاملة سولانا فور حدوثها"""
+    """استخراج عنوان التوكن فور حدوث المعاملة على سولانا"""
     try:
         payload = {
             "jsonrpc": "2.0",
@@ -68,8 +68,8 @@ def get_token_mint_from_solana_tx(signature: str) -> str:
         pass
     return ""
 
-def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana") -> dict:
-    """فحص السيولة وقوة الشراء من الثانية الأولى بدقة"""
+def analyze_smart_money_entry(token_address: str, chain_id: str = "solana") -> dict:
+    """تحقيق أولي لسيولة الشمعة الأولى وزخم الشراء وتحديد أماكن الدخول"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     
     for _ in range(4):
@@ -89,8 +89,8 @@ def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana"
                     sells = m5_txns.get("sells", 0)
                     volume_m5 = pair.get("volume", {}).get("m5", 0)
                     
-                    symbol = pair.get("baseToken", {}).get("symbol", "PUMP")
-                    name = pair.get("baseToken", {}).get("name", "New Token")
+                    symbol = pair.get("baseToken", {}).get("symbol", "HUNTER")
+                    name = pair.get("baseToken", {}).get("name", "Smart Token")
                     pair_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                     
                     return {
@@ -105,13 +105,13 @@ def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana"
                     }
         except Exception:
             pass
-        time.sleep(0.6)
+        time.sleep(0.5)
         
     return {"valid": False}
 
 last_sol_sig = ""
 
-def run_strict_sniper():
+def run_pro_hunter():
     global last_sol_sig, processed_tokens
     
     if RPC_URL:
@@ -138,43 +138,46 @@ def run_strict_sniper():
                             if len(processed_tokens) > 1000:
                                 processed_tokens.clear()
                                 
-                            metrics = check_liquidity_and_strong_buys(mint, "solana")
+                            metrics = analyze_smart_money_entry(mint, "solana")
                             if metrics.get("valid"):
                                 liq = metrics.get("liquidity", 0)
                                 vol = metrics.get("volume_m5", 0)
                                 buys = metrics.get("buys", 0)
                                 sells = metrics.get("sells", 0)
-                                symbol = metrics.get("symbol", "PUMP")
+                                symbol = metrics.get("symbol", "HUNTER")
                                 name = metrics.get("name", "Token")
                                 url = metrics.get("url", f"https://dexscreener.com/solana/{mint}")
                                 
+                                # فلتر احترافي لغلبة عمليات الشراء ودخول السيولة الأولى
                                 if buys >= sells:
                                     event_msg = (
-                                        f"🔥⚡ *صيد فوري (من الثانية الأولى + سيولة وشراء قوي)*\n\n"
+                                        f"🎯💎 *رصد نقطة دخول المحافظ الذكية (Smart Money Entry)*\n\n"
                                         f"🪙 الاسم: *{name}* (`{symbol}`)\n"
                                         f"💧 السيولة الأولية: *${liq:,.2f}*\n"
-                                        f"📊 حجم التداول الأولي: *${vol:,.2f}*\n"
+                                        f"📊 حجم التداول (5د): *${vol:,.2f}*\n"
                                         f"🛒 الصفقات: *{buys} شراء* 🟢 | *{sells} بيع* 🔴\n\n"
-                                        f"🔑 العقد:\n`{mint}`\n\n"
-                                        f"🔗 [DexScreener الفوري]({url})\n"
-                                        f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint})"
+                                        f"🔑 العقد المكتشف:\n`{mint}`\n\n"
+                                        f"🔍 **أدوات المتابعة والتحليل:**\n"
+                                        f"🔗 [DexScreener]({url})\n"
+                                        f"🛡️ [BubbleMaps تتبع المحافظ](https://app.bubblemaps.io/solana/{mint})\n"
+                                        f"⚡ [GMGN تحليل الشراء والمتابعة](https://gmgn.ai/solana/token/{mint})"
                                     )
                                     engine_status["last_event"] = event_msg
-                                    print(f"🚀 تم رصد واستيفاء شروط القنص للتوكن: {symbol} | سيولة: {liq}")
+                                    print(f"🚀 تم اصطياف فرصة احترافية للتوكن: {symbol}")
                                     send_telegram_alert(event_msg)
         except Exception as e:
-            print(f"❌ خطأ في رصد السيرفر: {e}")
+            print(f"❌ خطأ في محرك الصيد الاحترافي: {e}")
 
 def worker_loop():
     while True:
-        run_strict_sniper()
+        run_pro_hunter()
         time.sleep(0.4)
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل رادار السيولة والشراء القوي من الثانية الأولى بنجاح!")
+    print("✅ تم تفعيل رادار صيد ومتابعة المحافظ الاحترافي بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
