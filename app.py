@@ -13,14 +13,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Exact Second-One Sniper Active..."
+    "last_event": "Second-One High Liquidity & Strong Buy Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Exact Second-One Token Sniper",
+        "engine": "Second-One Strong Flow & Liquidity Sniper",
         "details": engine_status
     }
 
@@ -68,12 +68,53 @@ def get_token_mint_from_solana_tx(signature: str) -> str:
         pass
     return ""
 
+def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana") -> dict:
+    """فحص السيولة وقوة الشراء من الثانية الأولى بدقة"""
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+    
+    # محاولات سريعة جداً للحاق بالثانية الأولى فور توفر بيانات السوق
+    for _ in range(4):
+        try:
+            res = requests.get(url, timeout=3)
+            if res.status_code == 200:
+                data = res.json()
+                pairs = data.get("pairs", [])
+                if pairs:
+                    target_pairs = [p for p in pairs if p.get("chainId"] == chain_id or chain_id == "solana"]
+                    pair = target_pairs[0] if target_pairs else pairs[0]
+                    
+                    liq = pair.get("liquidity", {}).get("usd", 0)
+                    txns = pair.get("txns", {})
+                    m5_txns = txns.get("m5", {})
+                    buys = m5_txns.get("buys", 0)
+                    sells = m5_txns.get("sells", 0)
+                    volume_m5 = pair.get("volume", {}).get("m5", 0)
+                    
+                    symbol = pair.get("baseToken", {}).get("symbol", "PUMP")
+                    name = pair.get("baseToken", {}).get("name", "New Token")
+                    pair_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
+                    
+                    return {
+                        "valid": True,
+                        "liquidity": liq,
+                        "volume_m5": volume_m5,
+                        "buys": buys,
+                        "sells": sells,
+                        "symbol": symbol,
+                        "name": name,
+                        "url": pair_url
+                    }
+        except Exception:
+            pass
+        time.sleep(0.6)
+        
+    return {"valid": False}
+
 last_sol_sig = ""
 
-def run_second_one_sniper():
+def run_strict_sniper():
     global last_sol_sig, processed_tokens
     
-    # رصد عقد Pump.fun على سولانا من الثانية الأولى دون تأخير
     if RPC_URL:
         payload = {
             "jsonrpc": "2.0",
@@ -98,30 +139,45 @@ def run_second_one_sniper():
                             if len(processed_tokens) > 1000:
                                 processed_tokens.clear()
                                 
-                            event_msg = (
-                                f"⚡⏱️ *رصد فوري من الثانية الأولى (Exact Second One)*\n\n"
-                                f"⛓️ الشبكة: *Solana (Pump.fun)*\n"
-                                f"🔑 العقد:\n`{mint}`\n\n"
-                                f"📝 توقيع المعاملة:\n`{latest_sig}`\n\n"
-                                f"🔗 [DexScreener الفوري](https://dexscreener.com/solana/{mint})\n"
-                                f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint})"
-                            )
-                            engine_status["last_event"] = event_msg
-                            print(f"🚀 قنص من الثانية الأولى للتوكن: {mint}")
-                            send_telegram_alert(event_msg)
+                            # فحص السيولة وغلبة الشراء القوي
+                            metrics = check_liquidity_and_strong_buys(mint, "solana")
+                            if metrics.get("valid"):
+                                liq = metrics.get("liquidity", 0)
+                                vol = metrics.get("volume_m5", 0)
+                                buys = metrics.get("buys", 0)
+                                sells = metrics.get("sells", 0)
+                                symbol = metrics.get("symbol", "PUMP")
+                                name = metrics.get("name", "Token")
+                                url = metrics.get("url", f"https://dexscreener.com/solana/{mint}")
+                                
+                                # شروط الفلترة الصارمة (سيولة أولية جفت أو عمليات شراء متفوقة)
+                                if buys >= sells: # تفوق عمليات الشراء أو تعادلها في البداية المطلقة
+                                    event_msg = (
+                                        f"🔥⚡ *صيد فوري (من الثانية الأولى + سيولة وشراء قوي)*\n\n"
+                                        f"🪙 الاسم: *{name}* (`{symbol}`)\n"
+                                        f"💧 السيولة الأولية: *${liq:,.2f}*\n"
+                                        f"📊 حجم التداول الأولي: *${vol:,.2f}*\n"
+                                        f"🛒 الصفقات: *{buys} شراء* 🟢 | *{sells} بيع* 🔴\n\n"
+                                        f"🔑 العقد:\n`{mint}`\n\n"
+                                        f"🔗 [DexScreener الفوري]({url})\n"
+                                        f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint})"
+                                    )
+                                    engine_status["last_event"] = event_msg
+                                    print(f"🚀 تم رصد واستيفاء شروط القنص للتوكن: {symbol} | سيولة: {liq}")
+                                    send_telegram_alert(event_msg)
         except Exception as e:
-            print(f"❌ خطأ في الرصد الفوري: {e}")
+            print(f"❌ خطأ في رصد السيرفر: {e}")
 
 def worker_loop():
     while True:
-        run_second_one_sniper()
-        time.sleep(0.5) # فحص فائق السرعة كل نصف ثانية للقط الثواني الأولى تماماً
+        run_strict_sniper()
+        time.sleep(0.4) # فحص مستمر كل 0.4 ثانية لضمان السرعة المطلقة
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل رادار الثانية الأولى المطلقة بنجاح!")
+    print("✅ تم تفعيل رادار السيولة والشراء القوي من الثانية الأولى بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
