@@ -1,85 +1,75 @@
 import os
-import asyncio
-import json
-import websockets
+import time
+import requests
 from fastapi import FastAPI
 import uvicorn
 
 app = FastAPI()
 
-# قراءة متغيرات البيئة بدقة
+# قراءة رابط الـ RPC الأساسي
 RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
-WALLET_PRIVATE_KEY = os.environ.get("WALLET_PRIVATE_KEY", "")
-
-# تحويل رابط الـ RPC إلى WSS تلقائياً لتجنب أخطاء الاتصال
-if RPC_URL.startswith("https://"):
-    WSS_URL = RPC_URL.replace("https://", "wss://", 1)
-elif RPC_URL.startswith("http://"):
-    WSS_URL = RPC_URL.replace("http://", "ws://", 1)
-else:
-    WSS_URL = RPC_URL
 
 engine_status = {
     "status": "Running",
-    "last_event": "Waiting for connection..."
+    "last_event": "Waiting for transactions..."
 }
 
 @app.get("/")
 def health_check():
-    """مسار لفحص حالة السيرفر والحفاظ عليه نشطاً على Render"""
+    """مسار الحفاظ على السيرفر نشطاً على Render"""
     return {
         "status": "online",
-        "engine": "Solana Pump.fun Sniper Radar",
+        "engine": "Solana Pump.fun Polling Radar",
         "details": engine_status
     }
 
-async def sniper_mempool_worker():
-    """خلفية للاتصال بـ WebSocket ومراقبة العقود اللحظية"""
+def fetch_latest_pump_tokens():
+    """فحص أحدث المعاملات لعقد Pump.fun عبر HTTP RPC"""
+    if not RPC_URL:
+        print("⚠️ رابط RPC غير موجود في متغيرات البيئة.")
+        return
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # عقد Pump.fun
+            {"limit": 5}
+        ]
+    }
+    
+    try:
+        response = requests.post(RPC_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            transactions = data.get("result", [])
+            if transactions:
+                # نأخذ أحدث معاملة تم رصدها
+                latest_tx = transactions[0]
+                sig = latest_tx.get("signature", "")
+                event_msg = f"🚨 تم رصد نشاط جديد على Pump.fun! التوقيع: {sig}"
+                engine_status["last_event"] = event_msg
+                print(event_msg)
+        else:
+            print(f"⚠️ خطأ في الاستعلام HTTP: {response.status_code}")
+    except Exception as e:
+        print(f"❌ خطأ في الاتصال: {e}")
+
+import threading
+
+def background_worker():
+    """حلقة عمل تعمل في الخلفية لفحص الشبكة كل ثانيتين"""
     while True:
-        try:
-            print(f"🔄 جاري الاتصال بشبكة البلوكتشين عبر الـ WebSocket...")
-            async with websockets.connect(WSS_URL) as websocket:
-                # اشتراك في عقود إنشاء التوكنات الجديدة (Logs Subscription)
-                subscription_payload = {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "logsSubscribe",
-                    "params": [
-                        {"mentions": ["6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P"]}, # عقد برنامج Pump.fun
-                        {"commitment": "processed"}
-                    ]
-                }
-                await websocket.send(json.dumps(subscription_payload))
-                print("✅ تم الاتصال بنجاح وبدأت مراقبة الـ Mempool!")
-                
-                while True:
-                    response = await websocket.recv()
-                    data = json.loads(response)
-                    
-                    # التحقق من وجود بيانات عقد جديد
-                    if "params" in data:
-                        result = data["params"].get("result", {})
-                        value = result.get("value", {})
-                        signature = value.get("signature", "")
-                        logs = value.get("logs", [])
-                        
-                        # فحص ما إذا كانت اللوقز تخص إنشاء توكن جديد
-                        is_created = any("Create" in log or "initialize" in log for log in logs)
-                        if is_created and signature:
-                            event_msg = f"🚨 تم رصد عقد جديد على Pump.fun! التوقيع: {signature}"
-                            engine_status["last_event"] = event_msg
-                            print(event_msg)
-                            
-        except Exception as e:
-            err_msg = f"⚠️ خطأ في المحرك: {e}"
-            engine_status["last_event"] = err_msg
-            print(err_msg)
-            await asyncio.sleep(5)  # انتظار قبل إعادة المحاولة
+        fetch_latest_pump_tokens()
+        time.sleep(2) # فحص كل ثوانٍ لتجنب الضغط على الخادم
 
 @app.on_event("startup")
-async def startup_event():
-    """تشغيل رادار الميمبول في الخلفية فور إقلاع السيرفر"""
-    asyncio.create_task(sniper_mempool_worker())
+def startup_event():
+    """بدء المراقبة فور تشغيل السيرفر"""
+    t = threading.Thread(target=background_worker, daemon=True)
+    t.start()
+    print("✅ تم بدء تشغيل رادار البلوكتشين بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
