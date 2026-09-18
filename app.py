@@ -7,10 +7,10 @@ import threading
 
 app = FastAPI()
 
-# إعدادات الاتصال والتوكن والـ ID الصحيح
+# سحب المتغيرات من إعدادات البيئة في Render تلقائياً
 RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
-TG_TOKEN = "8517074768:AAG1NQKsDBOFpd07QrSXFYZ2qGwcVv0huak"
-TG_CHAT_ID = "8517074768"
+TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
@@ -27,7 +27,11 @@ def health_check():
     }
 
 def send_telegram_alert(message: str):
-    """دالة إرسال التنبيهات المباشرة إلى تليجرام"""
+    """دالة إرسال التنبيهات المباشرة إلى تليجرام باستخدام متغيرات البيئة"""
+    if not TG_TOKEN or not TG_CHAT_ID:
+        print("❌ تنبيه: توكن تليجرام أو الـ Chat ID غير مُعرف في إعدادات البيئة!")
+        return
+        
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {
         "chat_id": TG_CHAT_ID,
@@ -91,7 +95,7 @@ def worker_loop():
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم بدء تشغيل الرادار وتليجرام بنجاح!")
+    print("✅ تم بدء تشغيل الرادار بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
