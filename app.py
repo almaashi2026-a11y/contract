@@ -7,19 +7,20 @@ import threading
 
 app = FastAPI()
 
+RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Scanning multi-chain momentum tokens..."
+    "last_event": "Sniper mode active: Waiting for second-one launches..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Multi-Chain Momentum & Volume Pump Radar",
+        "engine": "Instant First-Second Multi-Chain Pump Sniper",
         "details": engine_status
     }
 
@@ -34,85 +35,96 @@ def send_telegram_alert(message: str):
         "disable_web_page_preview": True
     }
     try:
-        requests.post(url, json=payload, timeout=5)
+        requests.post(url, json=payload, timeout=3)
     except Exception as e:
         print(f"❌ خطأ تليجرام: {e}")
 
-# سجل لتخزين التوكنات التي تم إرسالها مسبقاً لعدم تكرار التنبيهات
-sent_tokens = set()
+processed_signatures = set()
 
-def fetch_latest_multichain_tokens():
-    global sent_tokens
-    # نستخدم نقطة نهاية DexScreener للبحث عن أحدث الأزواج أو العملات النشطة عالمياً
-    url = "https://api.dexscreener.com/latest/dex/search?q=solana%20eth%20bsc%20base" # أو جلب آخر الأصول المضافة
+def monitor_solana_instant_pumps():
+    """رصد فوري لعقد Pump.fun على سولانا من الثانية الأولى"""
+    global processed_signatures
+    if not RPC_URL:
+        return
+
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # عقد Pump.fun الأساسي
+            {"limit": 5}
+        ]
+    }
     
-    # بدلاً من ذلك، سنراقب أحدث التوكنات عبر جلبها من الطريقة العامة لـ DexScreener أو مصادر متعددة
-    # سنعتمد على نقطة جلب الـ Boosted / Latest profiles أو البحث الذكي
     try:
-        # جلب أحدث الأزواج المضافة أو الأكثر تفاعلاً عبر الـ API العام
+        response = requests.post(RPC_URL, json=payload, timeout=5)
+        if response.status_code == 200:
+            data = response.json()
+            transactions = data.get("result", [])
+            for tx in reversed(transactions):
+                sig = tx.get("signature", "")
+                if sig and sig not in processed_signatures:
+                    processed_signatures.add(sig)
+                    if len(processed_signatures) > 1000:
+                        processed_signatures.clear()
+                    
+                    # تنبيه فوري من الثانية الأولى وقبل اكتمال فهرسة المنصات
+                    event_msg = (
+                        f"⚡🚨 *قنبلة ولادة عملة جديدة (من الثانية الأولى)!*\n\n"
+                        f"⛓️ الشبكة: *Solana (Pump.fun)*\n"
+                        f"🔑 المعاملة العقدية:\n`{sig}`\n\n"
+                        f"🔗 [متابعة فورية على DexScreener](https://dexscreener.com/solana/{sig})\n"
+                        f"🛡️ [فحص BubbleMaps](https://app.bubblemaps.io/solana/{sig})"
+                    )
+                    engine_status["last_event"] = event_msg
+                    print(f"🚀 تم رصد انطلاقة فورية على سولانا: {sig}")
+                    send_telegram_alert(event_msg)
+    except Exception as e:
+        print(f"❌ خطأ في رصد سولانا الفوري: {e}")
+
+def monitor_multichain_latest_tokens():
+    """رصد أحدث الأزواج والسيولة المضافة عالمياً على جميع السلاسل"""
+    global processed_signatures
+    try:
+        url = "https://api.dexscreener.com/latest/dex/search?q=boosted" # أو جلب الأحدث
+        # بدلاً من ذلك، نستخدم نقطة نهاية أحدث البوستر والتوكنات المضافة
         trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
-        res = requests.get(trending_url, timeout=10)
+        res = requests.get(trending_url, timeout=5)
         if res.status_code == 200:
             tokens = res.json()
             if isinstance(tokens, list):
-                for item in tokens[:10]: # فحص أحدث 10 توكنات تم ترويجها أو إطلاقها
-                    chain_id = item.get("chainId", "")
+                for item in tokens[:5]:
+                    chain_id = item.get("chainId", "unknown")
                     token_address = item.get("tokenAddress", "")
                     
-                    if not token_address or token_address in sent_tokens:
+                    if not token_address or token_address in processed_signatures:
                         continue
-                        
-                    # جلب تفاصيل الزخم والسيولة لهذا التوكن بغض النظر عن سلسلته
-                    pair_url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-                    pair_res = requests.get(pair_url, timeout=5)
-                    if pair_res.status_code == 200:
-                        pair_data = pair_res.json()
-                        pairs = pair_data.get("pairs", [])
-                        if pairs:
-                            # نأخذ أول زوج نشط على الشبكة
-                            pair = pairs[0]
-                            liq = pair.get("liquidity", {}).get("usd", 0)
-                            vol = pair.get("volume", {}).get("h1", 0)
-                            txns = pair.get("txns", {})
-                            h1_txns = txns.get("h1", {})
-                            buys = h1_txns.get("buys", 0)
-                            sells = h1_txns.get("sells", 0)
-                            
-                            symbol = pair.get("baseToken", {}).get("symbol", "TOKEN")
-                            name = pair.get("baseToken", {}).get("name", "Unknown")
-                            dex_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
-                            
-                            # شروط الزخم والسيولة الحية (تجنب العملات الميتة)
-                            if liq > 1000 and buys > 2:
-                                sent_tokens.add(token_address)
-                                if len(sent_tokens) > 500: # تنظيف الذاكرة دورياً
-                                    sent_tokens.clear()
-                                    
-                                event_msg = (
-                                    f"🌐 *رصد فرصة عبر سلسلة ({chain_id.upper()})*\n\n"
-                                    f"🪙 الاسم: *{name}* (`{symbol}`)\n"
-                                    f"💧 السيولة: *${liq:,.2f}*\n"
-                                    f"📈 عمليات الشراء (ساعة): *{buys} شراء* مقابل *{sells} بيع*\n"
-                                    f"📊 حجم التداول: *${vol:,.2f}*\n\n"
-                                    f"🔑 العقد:\n`{token_address}`\n\n"
-                                    f"🔗 [DexScreener]({dex_url})"
-                                )
-                                engine_status["last_event"] = event_msg
-                                print(f"✅ تم رصد توكن على {chain_id}: {symbol} | سيولة: {liq}")
-                                send_telegram_alert(event_msg)
+                    
+                    processed_signatures.add(token_address)
+                    
+                    event_msg = (
+                        f"🌐🔥 *رصد إطلاق جديد ومبكر عبر ({chain_id.upper()})*\n\n"
+                        f"🔑 العقد:\n`{token_address}`\n\n"
+                        f"🔗 [فتح DexScreener](https://dexscreener.com/{chain_id}/{token_address})"
+                    )
+                    engine_status["last_event"] = event_msg
+                    print(f"✅ تم رصد توكن مبكر على {chain_id}: {token_address}")
+                    send_telegram_alert(event_msg)
     except Exception as e:
-        print(f"❌ خطأ في فحص السلاسل المتعددة: {e}")
+        print(f"❌ خطأ في فحص السلاسل الأخرى: {e}")
 
 def worker_loop():
     while True:
-        fetch_latest_multichain_tokens()
-        time.sleep(10) # فحص دوري كل 10 ثوانٍ لجميع السلاسل
+        monitor_solana_instant_pumps()
+        monitor_multichain_latest_tokens()
+        time.sleep(1.5) # فحص متواصل وعالي السرعة كل ثانية ونصف
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل رادار السلاسل المتعددة بنجاح!")
+    print("✅ تم تفعيل رادار القنص الفوري من الثانية الأولى بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
