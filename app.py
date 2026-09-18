@@ -11,9 +11,12 @@ RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
+# الحد الأدنى للسيولة بالدولار لاعتبار التوكن جيداً وقابلاً للتداول
+MIN_LIQUIDITY_USD = 2000.0  
+
 engine_status = {
     "status": "Running",
-    "last_event": "Waiting for transactions..."
+    "last_event": "Waiting for high-liquidity tokens..."
 }
 
 @app.get("/")
@@ -31,37 +34,73 @@ def send_telegram_alert(message: str):
     payload = {
         "chat_id": TG_CHAT_ID,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
     }
     try:
         requests.post(url, json=payload, timeout=5)
     except Exception as e:
         print(f"❌ خطأ تليجرام: {e}")
 
-last_sent_signature = ""
+def get_token_mint_from_tx(signature: str) -> str:
+    """استخراج عنوان التوكن الفعلي (Mint) من تفاصيل المعاملة عبر RPC"""
+    try:
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getTransaction",
+            "params": [
+                signature,
+                {"encoding": "jsonParsed", "maxSupportedTransactionVersion": 0}
+            ]
+        }
+        res = requests.post(RPC_URL, json=payload, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
+            result = data.get("result")
+            if result:
+                # البحث عن الحسابات الجديدة أو الـ postTokenBalances لاستخراج عقد التوكن
+                meta = result.get("meta", {})
+                post_balances = meta.get("postTokenBalances", [])
+                for pb in post_balances:
+                    mint = pb.get("mint")
+                    # تجاهل عملة SOL نفسها والتركيز على التوكنات الجديدة
+                    if mint and mint != "So11111111111111111111111111111111111111112":
+                        return mint
+    except Exception:
+        pass
+    return ""
 
-def check_token_metrics(mint_address: str) -> bool:
-    """
-    مستقبلاً: دالة لفحص السيولة أو حجم التداول عبر DexScreener API 
-    لضمان أن العقد يحمل سيولة حقيقية قبل التنبيه.
-    """
+def check_dexscreener_metrics(mint_address: str) -> dict:
+    """فحص السيولة وحجم التداول ومعلومات التوكن عبر DexScreener"""
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{mint_address}"
-        response = requests.get(url, timeout=5)
-        if response.status_code == 200:
-            data = response.json()
+        res = requests.get(url, timeout=5)
+        if res.status_code == 200:
+            data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                # مثال: التأكد من أن زوج التداول على سولانا ولديه حد أدنى من السيولة
-                solana_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if solana_pairs:
-                    liquidity = solana_pairs[0].get("liquidity", {}).get("usd", 0)
-                    # شرط مبدئي: يمكنك تعديل رقم السيولة الأدنى حسب رغبتك (مثلاً 5000 دولار)
-                    if liquidity >= 1000: 
-                        return True
-        return False
+                # تصفية أزواج شبكة سولانا
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                if sol_pairs:
+                    pair = sol_pairs[0]
+                    liquidity = pair.get("liquidity", {}).get("usd", 0)
+                    h1_volume = pair.get("volume", {}).get("h1", 0)
+                    symbol = pair.get("baseToken", {}).get("symbol", "UNKNOWN")
+                    name = pair.get("baseToken", {}).get("name", "Unknown Token")
+                    return {
+                        "valid": True,
+                        "liquidity": liquidity,
+                        "volume_h1": h1_volume,
+                        "symbol": symbol,
+                        "name": name,
+                        "pair_url": pair.get("url", f"https://dexscreener.com/solana/{mint_address}")
+                    }
     except Exception:
-        return True # في حال الخطأ نمرر التنبيه مؤقتاً
+        pass
+    return {"valid": False}
+
+last_sent_signature = ""
 
 def fetch_latest_pump_tokens():
     global last_sent_signature
@@ -69,12 +108,12 @@ def fetch_latest_pump_tokens():
         return
 
     payload = {
-        "jsonrcp": "2.0",
+        "jsonrpc": "2.0",
         "id": 1,
         "method": "getSignaturesForAddress",
         "params": [
-            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
-            {"limit": 3}
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # عقد Pump.fun
+            {"limit": 5}
         ]
     }
     
@@ -90,28 +129,48 @@ def fetch_latest_pump_tokens():
                 if sig and sig != last_sent_signature:
                     last_sent_signature = sig
                     
-                    # يمكنك هنا جلب عنوان التوكن الفعلي من تفاصيل المعاملة وفحصه
-                    event_msg = (
-                        f"🚀 *صید عُقد مميز على Pump.fun!*\n\n"
-                        f"🔑 المعاملة:\n`{sig}`\n\n"
-                        f"🔗 [تحليل DexScreener](https://dexscreener.com/solana/{sig})\n"
-                        f"🛡️ [فحص BubbleMaps](https://app.bubblemaps.io/solana/{sig})"
-                    )
-                    engine_status["last_event"] = event_msg
-                    send_telegram_alert(event_msg)
+                    # 1. استخراج عنوان التوكن الحقيقي
+                    mint_address = get_token_mint_from_tx(sig)
+                    if not mint_address:
+                        return
+                    
+                    # 2. فحص السيولة والمؤشرات عبر DexScreener
+                    metrics = check_dexscreener_metrics(mint_address)
+                    if metrics.get("valid"):
+                        liquidity = metrics.get("liquidity", 0)
+                        
+                        # فلترة الصفقات حسب الحد الأدنى للسيولة
+                        if liquidity >= MIN_LIQUIDITY_USD:
+                            symbol = metrics.get("symbol")
+                            name = metrics.get("name")
+                            volume = metrics.get("volume_h1")
+                            pair_url = metrics.get("pair_url")
+                            
+                            event_msg = (
+                                f"💎 *تم رصد عقد قوي بـ Pump.fun!*\n\n"
+                                f"🪙 الاسم: *{name}* (`{symbol}`)\n"
+                                f"💧 السيولة: *${liquidity:,.2f}*\n"
+                                f"📊 حجم التداول (ساعة): *${volume:,.2f}*\n\n"
+                                f"🔑 العقد:\n`{mint_address}`\n\n"
+                                f"🔗 [فتح DexScreener]({pair_url})\n"
+                                f"🛡️ [فحص BubbleMaps](https://app.bubblemaps.io/solana/{mint_address})"
+                            )
+                            engine_status["last_event"] = event_msg
+                            print(f"✅ تم إرسال تنبيه لتوكن ممتاز: {symbol} سيولة: {liquidity}")
+                            send_telegram_alert(event_msg)
     except Exception as e:
-        print(f"❌ خطأ في الاتصال: {e}")
+        print(f"❌ خطأ في الفحص: {e}")
 
 def worker_loop():
     while True:
         fetch_latest_pump_tokens()
-        time.sleep(2)
+        time.sleep(3)
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل رادار الفلترة الذكية بنجاح!")
+    print("✅ تم بدء تشغيل الرادار بفلترة السيولة بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
