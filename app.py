@@ -20,7 +20,7 @@ engine_status = {
 def health_check():
     return {
         "status": "online",
-        "engine": "Solana Flexible Pump Radar",
+        "engine": "Solana Pump Radar Pro",
         "details": engine_status
     }
 
@@ -40,7 +40,7 @@ def send_telegram_alert(message: str):
         print(f"❌ خطأ تليجرام: {e}")
 
 def get_token_mint_from_tx(signature: str) -> str:
-    """استخراج عنوان التوكن الفعلي (Mint) من تفاصيل المعاملة بدقة"""
+    """استخراج عنوان التوكن الفعلي من تفاصيل المعاملة"""
     try:
         payload = {
             "jsonrpc": "2.0",
@@ -67,32 +67,38 @@ def get_token_mint_from_tx(signature: str) -> str:
     return ""
 
 def get_token_info(mint_address: str) -> dict:
-    """محاولة جلب معلومات العملة من DexScreener"""
-    try:
-        url = f"https://api.dexscreener.com/latest/dex/tokens/{mint_address}"
-        res = requests.get(url, timeout=5)
-        if res.status_code == 200:
-            data = res.json()
-            pairs = data.get("pairs", [])
-            if pairs:
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if sol_pairs:
-                    pair = sol_pairs[0]
-                    return {
-                        "liquidity": pair.get("liquidity", {}).get("usd", 0),
-                        "volume": pair.get("volume", {}).get("h1", 0),
-                        "symbol": pair.get("baseToken", {}).get("symbol", "NEW"),
-                        "name": pair.get("baseToken", {}).get("name", "Pump Token"),
-                        "url": pair.get("url", f"https://dexscreener.com/solana/{mint_address}")
-                    }
-    except Exception:
-        pass
+    """جلب معلومات السيولة والاسم بدقة من DexScreener مع محاولة ثانية إذا لم تُفهرس بعد"""
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{mint_address}"
     
+    for _ in range(2):  # محاولتان بفارق بسيط لضمان تحديث الدكس سكرينير
+        try:
+            res = requests.get(url, timeout=5)
+            if res.status_code == 200:
+                data = res.json()
+                pairs = data.get("pairs", [])
+                if pairs:
+                    sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                    if sol_pairs:
+                        pair = sol_pairs[0]
+                        liq = pair.get("liquidity", {}).get("usd", 0)
+                        if liq > 0:  # إذا ظهرت السيولة بنجاح نعتمدها
+                            return {
+                                "liquidity": liq,
+                                "volume": pair.get("volume", {}).get("h1", 0),
+                                "symbol": pair.get("baseToken", {}).get("symbol", "PUMP"),
+                                "name": pair.get("baseToken", {}).get("name", "New Token"),
+                                "url": pair.get("url", f"https://dexscreener.com/solana/{mint_address}")
+                            }
+        except Exception:
+            pass
+        time.sleep(1)
+
+    # في حال لم تظهر السيولة بعد (عقد وليد اللحظة)، نعيد روابط مباشرة ومباشرة للمتابعة
     return {
         "liquidity": 0,
         "volume": 0,
         "symbol": "NEW",
-        "name": "Pump Token",
+        "name": "Fresh Pump",
         "url": f"https://dexscreener.com/solana/{mint_address}"
     }
 
@@ -108,7 +114,7 @@ def fetch_latest_pump_tokens():
         "id": 1,
         "method": "getSignaturesForAddress",
         "params": [
-            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P", # عقد Pump.fun
+            "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P",
             {"limit": 5}
         ]
     }
@@ -136,19 +142,21 @@ def fetch_latest_pump_tokens():
                     name = info.get("name")
                     pair_url = info.get("url")
                     
-                    if liq <= 50000:
-                        event_msg = (
-                            f"⚡ *رصد عقد عملة جديدة (Pump.fun)*\n\n"
-                            f"🪙 الاسم: *{name}* (`{symbol}`)\n"
-                            f"💧 السيولة: *${liq:,.2f}*\n"
-                            f"📊 التداول: *${vol:,.2f}*\n\n"
-                            f"🔑 العقد:\n`{mint_address}`\n\n"
-                            f"🔗 [DexScreener]({pair_url})\n"
-                            f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint_address})"
-                        )
-                        engine_status["last_event"] = event_msg
-                        print(f"✅ تم إرسال العقد الخفيف بنجاح: {mint_address}")
-                        send_telegram_alert(event_msg)
+                    # صياغة الرسالة بشكل احترافي
+                    liq_text = f"${liq:,.2f}" if liq > 0 else "🚀 جديدة جداً (تُحدد فوراً على الدكس)"
+                    
+                    event_msg = (
+                        f"⚡ *رصد عقد عملة جديدة (Pump.fun)*\n\n"
+                        f"🪙 الاسم: *{name}* (`{symbol}`)\n"
+                        f"💧 السيولة: *{liq_text}*\n"
+                        f"📊 التداول: *${vol:,.2f}*\n\n"
+                        f"🔑 العقد:\n`{mint_address}`\n\n"
+                        f"🔗 [DexScreener]({pair_url})\n"
+                        f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint_address})"
+                    )
+                    engine_status["last_event"] = event_msg
+                    print(f"✅ تم إرسال التنبيه للتوكن: {mint_address}")
+                    send_telegram_alert(event_msg)
     except Exception as e:
         print(f"❌ خطأ في الجلب: {e}")
 
@@ -161,7 +169,7 @@ def worker_loop():
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل الرادار المرن بنجاح!")
+    print("✅ تم تفعيل الرادار بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
