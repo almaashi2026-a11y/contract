@@ -7,10 +7,10 @@ import threading
 
 app = FastAPI()
 
-# قراءة متغيرات البيئة مع تثبيت توكن البوت الخاص بك مباشرة لتجنب الأخطاء
+# قراءة متغيرات البيئة مع تثبيت التوكن الصحيح والمعرف المباشر
 RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
 TG_TOKEN = "8517074768:AAG1NQKsDBOFpd07QrSXFYZ2qGwcVv0huak"
-TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+TG_CHAT_ID = "8895817474"
 
 engine_status = {
     "status": "Running",
@@ -27,11 +27,7 @@ def health_check():
     }
 
 def send_telegram_alert(message: str):
-    """دالة إرسال التنبيهات إلى تليجرام مع طباعة الأخطاء لتشخيصها بدقة"""
-    if not TG_CHAT_ID:
-        print("❌ تنبيه: TELEGRAM_CHAT_ID غير مضاف في متغيرات البيئة!")
-        return
-    
+    """دالة إرسال التنبيهات إلى تليجرام"""
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {
         "chat_id": TG_CHAT_ID,
@@ -42,6 +38,8 @@ def send_telegram_alert(message: str):
         response = requests.post(url, json=payload, timeout=5)
         if response.status_code != 200:
             print(f"❌ خطأ تليجرام (رد السيرفر): {response.text}")
+        else:
+            print("📤 تم إرسال التنبيه إلى تليجرام بنجاح!")
     except Exception as e:
         print(f"❌ خطأ في اتصال تليجرام: {e}")
 
