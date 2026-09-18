@@ -72,7 +72,6 @@ def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana"
     """فحص السيولة وقوة الشراء من الثانية الأولى بدقة"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     
-    # محاولات سريعة جداً للحاق بالثانية الأولى فور توفر بيانات السوق
     for _ in range(4):
         try:
             res = requests.get(url, timeout=3)
@@ -80,7 +79,7 @@ def check_liquidity_and_strong_buys(token_address: str, chain_id: str = "solana"
                 data = res.json()
                 pairs = data.get("pairs", [])
                 if pairs:
-                    target_pairs = [p for p in pairs if p.get("chainId"] == chain_id or chain_id == "solana"]
+                    target_pairs = [p for p in pairs if p.get("chainId") == chain_id or chain_id == "solana"]
                     pair = target_pairs[0] if target_pairs else pairs[0]
                     
                     liq = pair.get("liquidity", {}).get("usd", 0)
@@ -139,7 +138,6 @@ def run_strict_sniper():
                             if len(processed_tokens) > 1000:
                                 processed_tokens.clear()
                                 
-                            # فحص السيولة وغلبة الشراء القوي
                             metrics = check_liquidity_and_strong_buys(mint, "solana")
                             if metrics.get("valid"):
                                 liq = metrics.get("liquidity", 0)
@@ -150,8 +148,7 @@ def run_strict_sniper():
                                 name = metrics.get("name", "Token")
                                 url = metrics.get("url", f"https://dexscreener.com/solana/{mint}")
                                 
-                                # شروط الفلترة الصارمة (سيولة أولية جفت أو عمليات شراء متفوقة)
-                                if buys >= sells: # تفوق عمليات الشراء أو تعادلها في البداية المطلقة
+                                if buys >= sells:
                                     event_msg = (
                                         f"🔥⚡ *صيد فوري (من الثانية الأولى + سيولة وشراء قوي)*\n\n"
                                         f"🪙 الاسم: *{name}* (`{symbol}`)\n"
@@ -171,7 +168,7 @@ def run_strict_sniper():
 def worker_loop():
     while True:
         run_strict_sniper()
-        time.sleep(0.4) # فحص مستمر كل 0.4 ثانية لضمان السرعة المطلقة
+        time.sleep(0.4)
 
 @app.on_event("startup")
 def startup_event():
