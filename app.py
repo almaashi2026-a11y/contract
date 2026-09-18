@@ -13,14 +13,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Smart Money & Momentum Sniper Active..."
+    "last_event": "First-Second Primary Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Smart Money & Instant Momentum Sniper",
+        "engine": "First-Second Primary Token Sniper",
         "details": engine_status
     }
 
@@ -68,13 +68,13 @@ def get_token_mint_from_solana_tx(signature: str) -> str:
         pass
     return ""
 
-def analyze_smart_money_and_momentum(token_address: str, chain_id: str = "solana") -> dict:
-    """تحليل السيولة، الشمعة الأولى، وعمليات الشراء الذكية (Smart Money / Momentum)"""
+def analyze_primary_token(token_address: str, chain_id: str = "solana") -> dict:
+    """تحليل أولي سريع للسيولة والشمعة الأولى لحظة الولادة"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     
-    for _ in range(4):
+    for _ in range(3):
         try:
-            res = requests.get(url, timeout=4)
+            res = requests.get(url, timeout=3)
             if res.status_code == 200:
                 data = res.json()
                 pairs = data.get("pairs", [])
@@ -89,8 +89,8 @@ def analyze_smart_money_and_momentum(token_address: str, chain_id: str = "solana
                     sells = m5_txns.get("sells", 0)
                     volume_m5 = pair.get("volume", {}).get("m5", 0)
                     
-                    symbol = pair.get("baseToken", {}).get("symbol", "SMART")
-                    name = pair.get("baseToken", {}).get("name", "Target Token")
+                    symbol = pair.get("baseToken", {}).get("symbol", "NEW")
+                    name = pair.get("baseToken", {}).get("name", "Primary Token")
                     pair_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                     
                     return {
@@ -105,16 +105,25 @@ def analyze_smart_money_and_momentum(token_address: str, chain_id: str = "solana
                     }
         except Exception:
             pass
-        time.sleep(1)
+        time.sleep(0.8)
         
-    return {"ready": False}
+    return {
+        "ready": False,
+        "liquidity": 0,
+        "volume_m5": 0,
+        "buys": 0,
+        "sells": 0,
+        "symbol": "NEW",
+        "name": "Fresh Launch",
+        "url": f"https://dexscreener.com/{chain_id}/{token_address}"
+    }
 
 last_sol_sig = ""
 
-def run_sniper_engine():
+def run_primary_sniper():
     global last_sol_sig, processed_tokens
     
-    # 1. مراقبة سولانا الفورية (Pump.fun)
+    # 1. الرصد الفوري من الثانية الأولى عبر عقد Pump.fun في سولانا
     if RPC_URL:
         payload = {
             "jsonrpc": "2.0",
@@ -126,7 +135,7 @@ def run_sniper_engine():
             ]
         }
         try:
-            response = requests.post(RPC_URL, json=payload, timeout=5)
+            response = requests.post(RPC_URL, json=payload, timeout=4)
             if response.status_code == 200:
                 txs = response.json().get("result", [])
                 if txs:
@@ -136,82 +145,82 @@ def run_sniper_engine():
                         mint = get_token_mint_from_solana_tx(latest_sig)
                         if mint and mint not in processed_tokens:
                             processed_tokens.add(mint)
-                            
-                            metrics = analyze_smart_money_and_momentum(mint, "solana")
+                            if len(processed_tokens) > 1000:
+                                processed_tokens.clear()
+                                
+                            metrics = analyze_primary_token(mint, "solana")
                             liq = metrics.get("liquidity", 0)
                             vol_m5 = metrics.get("volume_m5", 0)
                             buys = metrics.get("buys", 0)
                             sells = metrics.get("sells", 0)
-                            symbol = metrics.get("symbol", "SMART")
+                            symbol = metrics.get("symbol", "NEW")
                             name = metrics.get("name", "Token")
                             url = metrics.get("url", f"https://dexscreener.com/solana/{mint}")
                             
                             event_msg = (
-                                f"🎯🤖 *رصد فرصة Smart Money & Momentum*\n\n"
+                                f"⚡🚨 *رصد أولي فوري (من الثانية الأولى)*\n\n"
                                 f"🪙 الاسم: *{name}* (`{symbol}`)\n"
                                 f"💧 سيولة الشمعة الأولى: *${liq:,.2f}*\n"
-                                f"📊 حجم الشمعة (5د): *${vol_m5:,.2f}*\n"
+                                f"📊 الحجم الأولي (5د): *${vol_m5:,.2f}*\n"
                                 f"📈 الصفقات: *{buys} شراء* | *{sells} بيع*\n\n"
                                 f"🔑 العقد:\n`{mint}`\n\n"
                                 f"🔗 [DexScreener]({url})\n"
                                 f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{mint})"
                             )
                             engine_status["last_event"] = event_msg
-                            print(f"✅ تنبيه Smart Money سولانا: {symbol}")
+                            print(f"✅ رصد أولي فوري سولانا: {symbol}")
                             send_telegram_alert(event_msg)
         except Exception as e:
-            print(f"❌ خطأ سولانا: {e}")
+            print(f"❌ خطأ رصد سولانا الفوري: {e}")
 
-    # 2. مراقبة السلاسل الأخرى (Multi-Chain Boosts & Trends)
+    # 2. رصد أحدث الإطلاقات العالمية على السلاسل الأخرى
     try:
         trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
-        res = requests.get(trending_url, timeout=4)
+        res = requests.get(trending_url, timeout=3)
         if res.status_code == 200:
             items = res.json()
             if isinstance(items, list):
-                for item in items[:3]:
+                for item in items[:2]:
                     chain_id = item.get("chainId", "solana")
                     token_address = item.get("tokenAddress", "")
                     
                     if token_address and token_address not in processed_tokens:
                         processed_tokens.add(token_address)
-                        if len(processed_tokens) > 1000:
-                            processed_tokens.clear()
-                            
-                        metrics = analyze_smart_money_and_momentum(token_address, chain_id)
+                        
+                        metrics = analyze_primary_token(token_address, chain_id)
                         liq = metrics.get("liquidity", 0)
                         vol_m5 = metrics.get("volume_m5", 0)
                         buys = metrics.get("buys", 0)
                         sells = metrics.get("sells", 0)
-                        symbol = metrics.get("symbol", "TOKEN")
+                        symbol = metrics.get("symbol", "NEW")
                         name = metrics.get("name", "Token")
                         url = metrics.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                         
                         event_msg = (
-                            f"🌐⚡ *رصد تدفق Smart Money على ({chain_id.upper()})*\n\n"
+                            f"🌐⚡ *رصد أولي عبر ({chain_id.upper()})*\n\n"
                             f"🪙 الاسم: *{name}* (`{symbol}`)\n"
-                            f"💧 السيولة الأولية: *${liq:,.2f}*\n"
+                            f"💧 السيولة: *${liq:,.2f}*\n"
                             f"📊 حجم الشمعة (5د): *${vol_m5:,.2f}*\n"
                             f"📈 الشراء: *{buys}* | البيع: *{sells}*\n\n"
                             f"🔑 العقد:\n`{token_address}`\n\n"
                             f"🔗 [DexScreener]({url})"
                         )
                         engine_status["last_event"] = event_msg
-                        print(f"✅ تنبيه Smart Money متعدد السلاسل: {symbol} ({chain_id})")
+                        print(f"✅ رصد أولي متعدد السلاسل: {symbol}")
                         send_telegram_alert(event_msg)
     except Exception as e:
         print(f"❌ خطأ السلاسل الأخرى: {e}")
 
 def worker_loop():
     while True:
-        run_sniper_engine()
-        time.sleep(2)
+        run_primary_sniper()
+        time.sleep(1.5) # حلقة تفتيش سريعة جداً كل ثانية ونصف
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل محرك Smart Money والزخم الفوري بنجاح!")
+    print("✅ تم تفعيل رادار الرصد الأولي من الثانية الأولى بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
