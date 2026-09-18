@@ -67,7 +67,7 @@ def get_token_mint_from_tx(signature: str) -> str:
     return ""
 
 def get_token_info(mint_address: str) -> dict:
-    """محاولة جلب معلومات العملة من DexScreener، وفي حال عدم التوفر نعيد بيانات افتراضية لكي لا يتعطل الإرسال"""
+    """محاولة جلب معلومات العملة من DexScreener"""
     try:
         url = f"https://api.dexscreener.com/latest/dex/tokens/{mint_address}"
         res = requests.get(url, timeout=5)
@@ -75,7 +75,7 @@ def get_token_info(mint_address: str) -> dict:
             data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                sol_pairs = [p for p in pairs if p.get("chainId"] == "solana"]
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
                 if sol_pairs:
                     pair = sol_pairs[0]
                     return {
@@ -127,7 +127,6 @@ def fetch_latest_pump_tokens():
                     
                     mint_address = get_token_mint_from_tx(sig)
                     if not mint_address:
-                        # إذا تعذر استخراج المينت، نرسل المعاملة الاحتياطية لضمان عدم توقف البوت
                         mint_address = sig
                     
                     info = get_token_info(mint_address)
@@ -137,7 +136,6 @@ def fetch_latest_pump_tokens():
                     name = info.get("name")
                     pair_url = info.get("url")
                     
-                    # فلترة سريعة تتجنب فقط العملات الضخمة جداً (فوق 50,000$) وتترك الخفيفة والجديدة تمر كلها
                     if liq <= 50000:
                         event_msg = (
                             f"⚡ *رصد عقد عملة جديدة (Pump.fun)*\n\n"
