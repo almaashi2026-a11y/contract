@@ -7,10 +7,10 @@ import threading
 
 app = FastAPI()
 
-# قراءة متغيرات البيئة مع تثبيت التوكن الصحيح والمعرف المباشر
+# إعدادات الاتصال والتوكن والـ ID الصحيح
 RPC_URL = os.environ.get("SOLANA_RPC_URL", "")
 TG_TOKEN = "8517074768:AAG1NQKsDBOFpd07QrSXFYZ2qGwcVv0huak"
-TG_CHAT_ID = "8895817474"
+TG_CHAT_ID = "8517074768"
 
 engine_status = {
     "status": "Running",
@@ -27,7 +27,7 @@ def health_check():
     }
 
 def send_telegram_alert(message: str):
-    """دالة إرسال التنبيهات إلى تليجرام"""
+    """دالة إرسال التنبيهات المباشرة إلى تليجرام"""
     url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
     payload = {
         "chat_id": TG_CHAT_ID,
@@ -82,16 +82,16 @@ def fetch_latest_pump_tokens():
     except Exception as e:
         print(f"❌ خطأ في الاتصال: {e}")
 
-def background_worker():
+def worker_loop():
     while True:
         fetch_latest_pump_tokens()
         time.sleep(2)
 
 @app.on_event("startup")
 def startup_event():
-    t = threading.Thread(target=background_worker, daemon=True)
+    t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم بدء تشغيل الرادار مع تليجرام بنجاح!")
+    print("✅ تم بدء تشغيل الرادار وتليجرام بنجاح!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
