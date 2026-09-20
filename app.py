@@ -41,7 +41,6 @@ def send_telegram_alert(message: str):
 processed_tokens = set()
 
 def analyze_smart_money_holders(token_address: str, chain_id: str) -> dict:
-    """تحليل سلوك المحافظ والتدفقات النقدية للتأكد من الشراء والاحتفاظ"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     try:
         res = requests.get(url, timeout=2)
@@ -55,18 +54,15 @@ def analyze_smart_money_holders(token_address: str, chain_id: str) -> dict:
                 liq = pair.get("liquidity", {}).get("usd", 0)
                 fdv = pair.get("fdv", 0)
                 
-                # فحص الصفقات اللحظية (التركيز على الشراكات القوية وغياب البيع العشوائي)
                 txns = pair.get("txns", {})
-                m5 = txns.get("m5", {}) # فحص دقيق للزخم المبكر جداً
+                m5 = txns.get("m5", {})
                 buys = m5.get("buys", 0)
                 sells = m5.get("sells", 0)
                 
-                # المعيار الاحترافي: عمليات شراء واضحة وسيطرة المشترين مع سيولة مقبولة
                 symbol = pair.get("baseToken", {}).get("symbol", "WHALE")
                 name = pair.get("baseToken", {}).get("name", "Smart Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                 
-                # شرط الاحتراف: المشترون أضعاف البائعين (أو صفر بيع في البداية) والسيولة تتجاوز الحد الأدنى الآمن
                 if buys >= 3 and sells <= 1 and liq >= 800:
                     return {
                         "valid": True,
@@ -85,13 +81,6 @@ def analyze_smart_money_holders(token_address: str, chain_id: str) -> dict:
 def run_smart_money_scanner():
     global processed_tokens
     try:
-        # جلب أحدث التوكنات المضافة أو المدعومة لضمان السرعة القصوى
-        endpoints = [
-            "https://api.dexscreener.com/token-boosts/latest/v1",
-            "https://api.dexscreener.com/latest/dex/search?q=solana" # يمكن تعديله حسب السلاسل المطلوبة
-        ]
-        
-        # نبدأ بالتركيز على التوكنات الجديدة كلياً والتعزيزات اللحظية
         trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
         res = requests.get(trending_url, timeout=3)
         if res.status_code == 200:
@@ -121,7 +110,7 @@ def run_smart_money_scanner():
                                 f"⛓️ الشبكة: *{chain_id.upper()}*\n"
                                 f"🪙 التوكن: *{name}* (`{symbol}`)\n"
                                 f"💧 السيولة: *${liq:,.2f}* \vert{} القيمة السوقية: *${fdv:,.2f}*\n"
-                                f"🛒 الزخم الفوري: *{buys} شراء* 🟢 مقابل *{sells} بيع* 🔴 (سيطرة تامة للمشترين)\n\n"
+                                f"🛒 الزخم الفوري: *{buys} شراء* 🟢 مقابل *{sells} بيع* 🔴\n\n"
                                 f"🔑 عقد التوكن:\n`{token_address}`\n\n"
                                 f"📊 أدوات التحليل الفوري والاحتفاظ:\n"
                                 f"🔗 [DexScreener]({url})\n"
@@ -137,7 +126,7 @@ def run_smart_money_scanner():
 def worker_loop():
     while True:
         run_smart_money_scanner()
-        time.sleep(0.05) # أقصى سرعة مسح ممكنة لسباق البلوكتشين
+        time.sleep(0.05)
 
 @app.on_event("startup")
 def startup_event():
