@@ -106,17 +106,17 @@ def run_smart_money_scanner():
                             url = metrics.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                             
                             event_msg = (
-                                f"💎🐋 *صيد محفظة ذكية تحتفظ (Smart Money Holder)*\n\n"
-                                f"⛓️ الشبكة: *{chain_id.upper()}*\n"
-                                f"🪙 التوكن: *{name}* (`{symbol}`)\n"
-                                f"💧 السيولة: *${liq:,.2f}* \vert{} القيمة السوقية: *${fdv:,.2f}*\n"
-                                f"🛒 الزخم الفوري: *{buys} شراء* 🟢 مقابل *{sells} بيع* 🔴\n\n"
+                                f"💎🐋 صيد محفظة ذكية تحتفظ (Smart Money Holder)\n\n"
+                                f"⛓️ الشبكة: {chain_id.upper()}\n"
+                                f"🪙 التوكن: {name} ({symbol})\n"
+                                f"💧 السيولة: ${liq:,.2f} \vert{} القيمة السوقية: ${fdv:,.2f}\n"
+                                f"🛒 الزخم الفوري: {buys} شراء 🟢 مقابل {sells} بيع 🔴\n\n"
                                 f"🔑 عقد التوكن:\n`{token_address}`\n\n"
                                 f"📊 أدوات التحليل الفوري والاحتفاظ:\n"
                                 f"🔗 [DexScreener]({url})\n"
-                                f"🛡️ [BubbleMaps (فحص الموزعين)](https://app.bubblemaps.io/{chain_id}/{token_address})\n"
-                                f"⚡ [GMGN (تتبع المحافظ الحية)](https://gmgn.ai/{chain_id}/token/{token_address})\n"
-                                f"🤖 [Trojan Bot (تنفيذ سريع)](https://t.me/Paris_TrojanBot?start=r-1)"
+                                f"🛡️ [BubbleMaps](https://app.bubblemaps.io/{chain_id}/{token_address})\n"
+                                f"⚡ [GMGN](https://gmgn.ai/{chain_id}/token/{token_address})\n"
+                                f"🤖 [Trojan Bot](https://t.me/Paris_TrojanBot?start=r-1)"
                             )
                             engine_status["last_event"] = event_msg
                             send_telegram_alert(event_msg)
