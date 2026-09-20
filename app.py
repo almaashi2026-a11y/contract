@@ -48,7 +48,6 @@ def analyze_solana_smart_money(token_address: str) -> dict:
             data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                # تصفية أزواج شبكة سولانا حصرياً
                 sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
                 if not sol_pairs:
                     return {"valid": False}
@@ -66,7 +65,6 @@ def analyze_solana_smart_money(token_address: str) -> dict:
                 name = pair.get("baseToken", {}).get("name", "Solana Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
                 
-                # شرط الاحتراف: شراء قوي مع غياب البيع وسيولة أولية ممتازة
                 if buys >= 2 and sells <= 1 and liq >= 500:
                     return {
                         "valid": True,
@@ -136,7 +134,8 @@ def worker_loop():
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("🚀 تم تفعيل رادار سولانا للمحافظ الذكية من الثواني الأولى بنجاح!")
+    print("🚀 تم تفعيل رادار سولانا للمحافظ الذكية بنجاح!")
 
 if __name__ == "__main__":
-    uvicorn.run("app:app", host="0.0.0.0", port=10000)
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run("app:app", host="0.0.0.0", port=port)
