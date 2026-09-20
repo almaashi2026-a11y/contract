@@ -112,7 +112,8 @@ def run_solana_sniper():
                             event_msg = (
                                 f"💎🐋 صيد محفظة ذكية (Solana First-Second)\n\n"
                                 f"🪙 التوكن: {name} ({symbol})\n"
-                                f"💧 السيولة: ${liq:,.2f} \vert{} القيمة السوقية: ${fdv:,.2f}\n"
+                                f"💧 السيولة: ${liq:,.2f}\n"
+                                f"📈 القيمة السوقية: ${fdv:,.2f}\n"
                                 f"🛒 الزخم: {buys} شراء 🟢 | {sells} بيع 🔴\n\n"
                                 f"🔑 العقد:\n`{token_address}`\n\n"
                                 f"📊 أدوات التحليل والمتابعة:\n"
