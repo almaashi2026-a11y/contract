@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Solana Smart Money First-Second Sniper Active..."
+    "last_event": "Solana Holder Accumulation Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Solana Elite Smart Money Sniper",
+        "engine": "Solana Holder Accumulation Sniper",
         "details": engine_status
     }
 
@@ -40,7 +40,7 @@ def send_telegram_alert(message: str):
 
 processed_tokens = set()
 
-def analyze_solana_smart_money(token_address: str) -> dict:
+def analyze_solana_accumulation(token_address: str) -> dict:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     try:
         res = requests.get(url, timeout=2)
@@ -61,11 +61,12 @@ def analyze_solana_smart_money(token_address: str) -> dict:
                 buys = m5.get("buys", 0)
                 sells = m5.get("sells", 0)
                 
-                symbol = pair.get("baseToken", {}).get("symbol", "SOL_WHALE")
+                symbol = pair.get("baseToken", {}).get("symbol", "HOLDER")
                 name = pair.get("baseToken", {}).get("name", "Solana Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
                 
-                if buys >= 2 and sells <= 1 and liq >= 500:
+                # شروط الاحتفاظ والسيولة القوية: شراء قوي، صفر بيع، سيولة أولية عالية (أكثر من 3000 دولار مثلاً) وقيمة سوقية مناسبة
+                if buys >= 3 and sells == 0 and liq >= 3000:
                     return {
                         "valid": True,
                         "liquidity": liq,
@@ -99,22 +100,22 @@ def run_solana_sniper():
                         if len(processed_tokens) > 3000:
                             processed_tokens.clear()
                             
-                        metrics = analyze_solana_smart_money(token_address)
+                        metrics = analyze_solana_accumulation(token_address)
                         if metrics.get("valid"):
                             liq = metrics.get("liquidity", 0)
                             fdv = metrics.get("fdv", 0)
                             buys = metrics.get("buys", 0)
                             sells = metrics.get("sells", 0)
-                            symbol = metrics.get("symbol", "WHALE")
+                            symbol = metrics.get("symbol", "HOLDER")
                             name = metrics.get("name", "Token")
                             url = metrics.get("url", f"https://dexscreener.com/solana/{token_address}")
                             
                             event_msg = (
-                                f"💎🐋 صيد محفظة ذكية (Solana First-Second)\n\n"
+                                f"💎🛡️ رصد محافظ الاحتفاظ والسيولة القوية (Accumulation)\n\n"
                                 f"🪙 التوكن: {name} ({symbol})\n"
-                                f"💧 السيولة: ${liq:,.2f}\n"
+                                f"💧 السيولة القوية: ${liq:,.2f}\n"
                                 f"📈 القيمة السوقية: ${fdv:,.2f}\n"
-                                f"🛒 الزخم: {buys} شراء 🟢 | {sells} بيع 🔴\n\n"
+                                f"🛒 العمليات: {buys} شراء متتالي 🟢 | البيع: 0 (احتفاظ تام)\n\n"
                                 f"🔑 العقد:\n`{token_address}`\n\n"
                                 f"📊 أدوات التحليل والمتابعة:\n"
                                 f"🔗 [DexScreener]({url})\n"
@@ -135,7 +136,7 @@ def worker_loop():
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("🚀 تم تفعيل رادار سولانا للمحافظ الذكية بنجاح!")
+    print("🚀 تم تفعيل رادار احتفاظ المحافظ والسيولة القوية بنجاح!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
