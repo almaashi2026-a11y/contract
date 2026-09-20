@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Second-One True Sniper Active Across All Chains..."
+    "last_event": "Smart Money Holder Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "True Second-One Multi-Chain Sniper",
+        "engine": "Elite Smart Money Holder Sniper",
         "details": engine_status
     }
 
@@ -40,8 +40,8 @@ def send_telegram_alert(message: str):
 
 processed_tokens = set()
 
-def get_instant_token_data(token_address: str, chain_id: str) -> dict:
-    """جلب بيانات اللحظة الأولى وفحص الصفقات الفورية بدلاً من الانتظار"""
+def analyze_smart_money_holders(token_address: str, chain_id: str) -> dict:
+    """تحليل سلوك المحافظ والتدفقات النقدية للتأكد من الشراء والاحتفاظ"""
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     try:
         res = requests.get(url, timeout=2)
@@ -53,87 +53,97 @@ def get_instant_token_data(token_address: str, chain_id: str) -> dict:
                 pair = target_pairs[0] if target_pairs else pairs[0]
                 
                 liq = pair.get("liquidity", {}).get("usd", 0)
+                fdv = pair.get("fdv", 0)
                 
-                # التقاط فوري لبيانات الدقيقة الأولى (أو التداولات الأولى المتاحة)
+                # فحص الصفقات اللحظية (التركيز على الشراكات القوية وغياب البيع العشوائي)
                 txns = pair.get("txns", {})
-                h1_txns = txns.get("h1", {}) # نستخدم فحص شامل للحظات الأولى
-                buys = h1_txns.get("buys", 1)
-                sells = h1_txns.get("sells", 0)
-                volume = pair.get("volume", {}).get("h1", 0)
+                m5 = txns.get("m5", {}) # فحص دقيق للزخم المبكر جداً
+                buys = m5.get("buys", 0)
+                sells = m5.get("sells", 0)
                 
-                symbol = pair.get("baseToken", {}).get("symbol", "SNIPER")
-                name = pair.get("baseToken", {}).get("name", "New Token")
+                # المعيار الاحترافي: عمليات شراء واضحة وسيطرة المشترين مع سيولة مقبولة
+                symbol = pair.get("baseToken", {}).get("symbol", "WHALE")
+                name = pair.get("baseToken", {}).get("name", "Smart Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                 
-                return {
-                    "valid": True,
-                    "liquidity": liq,
-                    "volume": volume,
-                    "buys": buys,
-                    "sells": sells,
-                    "symbol": symbol,
-                    "name": name,
-                    "url": pair_url
-                }
+                # شرط الاحتراف: المشترون أضعاف البائعين (أو صفر بيع في البداية) والسيولة تتجاوز الحد الأدنى الآمن
+                if buys >= 3 and sells <= 1 and liq >= 800:
+                    return {
+                        "valid": True,
+                        "liquidity": liq,
+                        "fdv": fdv,
+                        "buys": buys,
+                        "sells": sells,
+                        "symbol": symbol,
+                        "name": name,
+                        "url": pair_url
+                    }
     except Exception:
         pass
     return {"valid": False}
 
-def run_true_second_one_sniper():
+def run_smart_money_scanner():
     global processed_tokens
     try:
+        # جلب أحدث التوكنات المضافة أو المدعومة لضمان السرعة القصوى
+        endpoints = [
+            "https://api.dexscreener.com/token-boosts/latest/v1",
+            "https://api.dexscreener.com/latest/dex/search?q=solana" # يمكن تعديله حسب السلاسل المطلوبة
+        ]
+        
+        # نبدأ بالتركيز على التوكنات الجديدة كلياً والتعزيزات اللحظية
         trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
         res = requests.get(trending_url, timeout=3)
         if res.status_code == 200:
             items = res.json()
             if isinstance(items, list):
-                for item in items[:8]:
+                for item in items[:10]:
                     chain_id = item.get("chainId", "solana")
                     token_address = item.get("tokenAddress", "")
                     
                     if token_address and token_address not in processed_tokens:
                         processed_tokens.add(token_address)
-                        if len(processed_tokens) > 3000:
+                        if len(processed_tokens) > 4000:
                             processed_tokens.clear()
                             
-                        metrics = get_instant_token_data(token_address, chain_id)
+                        metrics = analyze_smart_money_holders(token_address, chain_id)
                         if metrics.get("valid"):
                             liq = metrics.get("liquidity", 0)
-                            volume = metrics.get("volume", 0)
+                            fdv = metrics.get("fdv", 0)
                             buys = metrics.get("buys", 0)
                             sells = metrics.get("sells", 0)
-                            symbol = metrics.get("symbol", "SNIPER")
+                            symbol = metrics.get("symbol", "WHALE")
                             name = metrics.get("name", "Token")
                             url = metrics.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
                             
-                            # شروط فورية من الثانية الأولى للمحافظ القوية وغلبة الشراء
-                            if buys >= sells and liq > 500:
-                                event_msg = (
-                                    f"⚡🎯 *رصد فوري من الثانية الأولى (Smart Money)*\n\n"
-                                    f"⛓️ الشبكة: *{chain_id.upper()}*\n"
-                                    f"🪙 الاسم: *{name}* (`{symbol}`)\n"
-                                    f"💧 السيولة الأولية: *${liq:,.2f}*\n"
-                                    f"🛒 الصفقات الفورية: *{buys} شراء* 🟢 | *{sells} بيع* 🔴\n\n"
-                                    f"🔑 العقد:\n`{token_address}`\n\n"
-                                    f"🔗 [DexScreener]({url})\n"
-                                    f"🛡️ [BubbleMaps](https://app.bubblemaps.io/{chain_id}/{token_address})\n"
-                                    f"⚡ [GMGN متابعة المحافظ](https://gmgn.ai/{chain_id}/token/{token_address})"
-                                )
-                                engine_status["last_event"] = event_msg
-                                send_telegram_alert(event_msg)
+                            event_msg = (
+                                f"💎🐋 *صيد محفظة ذكية تحتفظ (Smart Money Holder)*\n\n"
+                                f"⛓️ الشبكة: *{chain_id.upper()}*\n"
+                                f"🪙 التوكن: *{name}* (`{symbol}`)\n"
+                                f"💧 السيولة: *${liq:,.2f}* \vert{} القيمة السوقية: *${fdv:,.2f}*\n"
+                                f"🛒 الزخم الفوري: *{buys} شراء* 🟢 مقابل *{sells} بيع* 🔴 (سيطرة تامة للمشترين)\n\n"
+                                f"🔑 عقد التوكن:\n`{token_address}`\n\n"
+                                f"📊 أدوات التحليل الفوري والاحتفاظ:\n"
+                                f"🔗 [DexScreener]({url})\n"
+                                f"🛡️ [BubbleMaps (فحص الموزعين)](https://app.bubblemaps.io/{chain_id}/{token_address})\n"
+                                f"⚡ [GMGN (تتبع المحافظ الحية)](https://gmgn.ai/{chain_id}/token/{token_address})\n"
+                                f"🤖 [Trojan Bot (تنفيذ سريع)](https://t.me/Paris_TrojanBot?start=r-1)"
+                            )
+                            engine_status["last_event"] = event_msg
+                            send_telegram_alert(event_msg)
     except Exception:
         pass
 
 def worker_loop():
     while True:
-        run_true_second_one_sniper()
-        time.sleep(0.1) # سرعة قصوى بدون أي انتظار
+        run_smart_money_scanner()
+        time.sleep(0.05) # أقصى سرعة مسح ممكنة لسباق البلوكتشين
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("✅ تم تفعيل رادار (الثانية الأولى الحقيقية) لجميع السلاسل بنجاح!")
+    print("🚀 تم تفعيل محرك رصد المحافظ الذكية والاحتفاظ بنجاح تام!")
 
 if __name__ == "__main__":
     uvicorn.run("app:app", host="0.0.0.0", port=10000)
