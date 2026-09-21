@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Solana Holder Accumulation Sniper Active..."
+    "last_event": "Solana Pre-Launch & Accumulation Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Solana Holder Accumulation Sniper",
+        "engine": "Solana Pre-Launch Smart Money Sniper",
         "details": engine_status
     }
 
@@ -40,7 +40,7 @@ def send_telegram_alert(message: str):
 
 processed_tokens = set()
 
-def analyze_solana_accumulation(token_address: str) -> dict:
+def analyze_pre_launch_accumulation(token_address: str) -> dict:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     try:
         res = requests.get(url, timeout=2)
@@ -48,7 +48,7 @@ def analyze_solana_accumulation(token_address: str) -> dict:
             data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                sol_pairs = [p for p in pairs if p.get("chainId"] == "solana"]
                 if not sol_pairs:
                     return {"valid": False}
                 
@@ -61,12 +61,12 @@ def analyze_solana_accumulation(token_address: str) -> dict:
                 buys = m5.get("buys", 0)
                 sells = m5.get("sells", 0)
                 
-                symbol = pair.get("baseToken", {}).get("symbol", "HOLDER")
-                name = pair.get("baseToken", {}).get("name", "Solana Token")
+                symbol = pair.get("baseToken", {}).get("symbol", "EARLY")
+                name = pair.get("baseToken", {}).get("name", "Pre-Launch Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
                 
-                # شروط الاحتفاظ والسيولة القوية: شراء قوي، صفر بيع، سيولة أولية عالية (أكثر من 3000 دولار مثلاً) وقيمة سوقية مناسبة
-                if buys >= 3 and sells == 0 and liq >= 3000:
+                # شروط ما قبل الانفجار واكتتاب المحافظ: شراء حصري بدون أي مبيعات وسيولة تجميعية مبكرة
+                if buys >= 2 and sells == 0 and 1000 <= liq <= 25000:
                     return {
                         "valid": True,
                         "liquidity": liq,
@@ -81,7 +81,7 @@ def analyze_solana_accumulation(token_address: str) -> dict:
         pass
     return {"valid": False}
 
-def run_solana_sniper():
+def run_pre_launch_sniper():
     global processed_tokens
     try:
         trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
@@ -97,30 +97,30 @@ def run_solana_sniper():
                     token_address = item.get("tokenAddress", "")
                     if token_address and token_address not in processed_tokens:
                         processed_tokens.add(token_address)
-                        if len(processed_tokens) > 3000:
+                        if len(processed_tokens) > 4000:
                             processed_tokens.clear()
                             
-                        metrics = analyze_solana_accumulation(token_address)
+                        metrics = analyze_pre_launch_accumulation(token_address)
                         if metrics.get("valid"):
                             liq = metrics.get("liquidity", 0)
                             fdv = metrics.get("fdv", 0)
                             buys = metrics.get("buys", 0)
                             sells = metrics.get("sells", 0)
-                            symbol = metrics.get("symbol", "HOLDER")
+                            symbol = metrics.get("symbol", "EARLY")
                             name = metrics.get("name", "Token")
                             url = metrics.get("url", f"https://dexscreener.com/solana/{token_address}")
                             
                             event_msg = (
-                                f"💎🛡️ رصد محافظ الاحتفاظ والسيولة القوية (Accumulation)\n\n"
-                                f"🪙 التوكن: {name} ({symbol})\n"
-                                f"💧 السيولة القوية: ${liq:,.2f}\n"
-                                f"📈 القيمة السوقية: ${fdv:,.2f}\n"
-                                f"🛒 العمليات: {buys} شراء متتالي 🟢 | البيع: 0 (احتفاظ تام)\n\n"
-                                f"🔑 العقد:\n`{token_address}`\n\n"
-                                f"📊 أدوات التحليل والمتابعة:\n"
+                                f"🚀💎 *رصد مرحلة الاكتتاب والتجميع المبكر (Pre-Launch)*\n\n"
+                                f"🪙 التوكن: {name} (`{symbol}`)\n"
+                                f"💧 السيولة التجميعية: `${liq:,.2f}`\n"
+                                f"📈 القيمة السوقية: `${fdv:,.2f}`\n"
+                                f"🛒 عمليات الشراء الصافي: `{buys}` شراء 🟢 | البيع: `0` (احتفاظ كامل)\n\n"
+                                f"🔑 عقد التوكن (قبل الانفجار):\n`{token_address}`\n\n"
+                                f"🔍 *أدوات الفحص والتحقق الإجباري قبل الدخول:*\n"
                                 f"🔗 [DexScreener]({url})\n"
-                                f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{token_address})\n"
-                                f"⚡ [GMGN](https://gmgn.ai/solana/token/{token_address})"
+                                f"🛡️ [BubbleMaps (فحص تركز المحافظ والمطور)](https://app.bubblemaps.io/solana/{token_address})\n"
+                                f"⚡ [GMGN (تتبع حيتان الشراء)](https://gmgn.ai/solana/token/{token_address})"
                             )
                             engine_status["last_event"] = event_msg
                             send_telegram_alert(event_msg)
@@ -129,14 +129,14 @@ def run_solana_sniper():
 
 def worker_loop():
     while True:
-        run_solana_sniper()
+        run_pre_launch_sniper()
         time.sleep(0.05)
 
 @app.on_event("startup")
 def startup_event():
     t = threading.Thread(target=worker_loop, daemon=True)
     t.start()
-    print("🚀 تم تفعيل رادار احتفاظ المحافظ والسيولة القوية بنجاح!")
+    print("🚀 تم تفعيل محرك اكتتاب وتجميع المحافظ المبكرة على سولانا بنجاح!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
