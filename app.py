@@ -10,20 +10,16 @@ app = FastAPI()
 TG_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-# روبن هود تشين العامة (Chain ID: 4663)
-# سنستخدم الـ Public RPC المعتمد للشبكة لجلب أحدث المعاملات والتحويلات الكبيرة
-ROBINHOOD_RPC = "https://rpc.robinhood.com"  # أو الـ RPC البديل المعتمد للشبكة
-
 engine_status = {
     "status": "Running",
-    "last_event": "Robinhood Chain Whale & Large Transfer Sniper Active..."
+    "last_event": "Smart Money & Whale Cluster Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Robinhood Chain Whale Transfer Sniper",
+        "engine": "Smart Money Cluster Sniper",
         "details": engine_status
     }
 
@@ -42,62 +38,116 @@ def send_telegram_alert(message: str):
     except Exception:
         pass
 
-processed_txs = set()
+processed_tokens = set()
 
-def fetch_robinhood_whale_transfers():
-    global processed_txs
+def evaluate_smart_money_cluster(token_address: str) -> dict:
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+    try:
+        res = requests.get(url, timeout=3)
+        if res.status_code == 200:
+            data = res.json()
+            pairs = data.get("pairs", [])
+            if pairs:
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                if not sol_pairs:
+                    return {"valid": False}
+                
+                pair = sol_pairs[0]
+                liq = pair.get("liquidity", {}).get("usd", 0)
+                fdv = pair.get("fdv", 0)
+                
+                txns = pair.get("txns", {})
+                m5 = txns.get("m5", {})
+                buys = m5.get("buys", 0)
+                sells = m5.get("sells", 0)
+                volume = pair.get("volume", {}).get("m5", 0)
+                
+                symbol = pair.get("baseToken", {}).get("symbol", "SMART")
+                name = pair.get("baseToken", {}).get("name", "Token")
+                pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
+                
+                # معايير رصد تجمعات المال الذكي واكتشاف الدخول المبكر:
+                # 1. عمليات شراء متعددة ومكثفة (buys >= 6) تؤكد تكدس المحافظ
+                # 2. انعدام المبيعات تماماً (sells == 0) لضمان الاحتفاظ التام وعدم التفريط بالتوكن
+                # 3. سيولة أمان أولية مناسبة ($3,000 إلى $40,000)
+                if buys >= 6 and sells == 0 and 3000 <= liq <= 40000:
+                    
+                    grade = "🧠💎 [تقاطع المال الذكي] تجميع مبكر للحيتان (Smart Money Cluster)"
+                    
+                    return {
+                        "valid": True,
+                        "grade": grade,
+                        "liquidity": liq,
+                        "fdv": fdv,
+                        "buys": buys,
+                        "sells": sells,
+                        "volume": volume,
+                        "symbol": symbol,
+                        "name": name,
+                        "url": pair_url
+                    }
+    except Exception:
+        pass
+    return {"valid": False}
+
+def run_smart_money_engine():
+    global processed_tokens
     while True:
         try:
-            # طلب أحدث رقم كتلة (Block Number) من شبكة روبن هود
-            payload = {
-                "jsonrpc": "2.0",
-                "method": "eth_getBlockByNumber",
-                "params": ["latest", True],
-                "id": 1
-            }
-            res = requests.post(ROBINHOOD_RPC, json=payload, timeout=5)
+            trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
+            res = requests.get(trending_url, timeout=4)
             if res.status_code == 200:
-                data = res.json()
-                block = data.get("result", {})
-                if block and "transactions" in block:
-                    txs = block.get("transactions", [])
-                    for tx in txs:
-                        tx_hash = tx.get("hash", "")
-                        value_hex = tx.get("value", "0x0")
+                items = res.json()
+                if isinstance(items, list):
+                    for item in items:
+                        if item.get("chainId") != "solana":
+                            continue
                         
-                        # تحويل قيمة المعاملة من النظام السداسي عشري إلى قيمة رقمية بـ ETH
-                        value_eth = int(value_hex, 16) / 10**18
-                        
-                        # شرط رصد التحويلات الكبيرة جداً للحيتان والدخول المؤسسي (مثلاً أكبر من أو يساوي 2 ETH أو حسب رغبتك)
-                        if value_eth >= 2.0 and tx_hash not in processed_txs:
-                            processed_txs.add(tx_hash)
-                            if len(processed_txs) > 2000:
-                                processed_txs.clear()
+                        token_address = item.get("tokenAddress", "")
+                        if token_address and token_address not in processed_tokens:
+                            processed_tokens.add(token_address)
+                            if len(processed_tokens) > 3000:
+                                processed_tokens.clear()
                             
-                            fr = tx.get("from", "Unknown")
-                            to = tx.get("to", "Contract Creation")
-                            
-                            alert_msg = (
-                                f"🚨🐋 *رصد تحويل ضخم وحركة حيتان على Robinhood Chain*\n\n"
-                                f"💰 القيمة المحولة: `{value_eth:.2f} ETH`\n"
-                                f"📤 من محفظة: `{fr[:6]}...{fr[-4:]}`\n"
-                                f"📥 إلى العقد/المحفظة: `{to[:6] if to else 'N/A'}...{to[-4:] if to else ''}`\n\n"
-                                f"🔑 *معرف المعاملة (TxHash):*\n`{tx_hash}`\n\n"
-                                f"🛡️ *مستكشف شبكة روبهود (التحقق الفوري):*\n"
-                                f"🔗 [رابط المستكشف](https://rbslot.com/tx/{tx_hash})"
-                            )
-                            engine_status["last_event"] = alert_msg
-                            send_telegram_alert(alert_msg)
+                            opp = evaluate_smart_money_cluster(token_address)
+                            if opp.get("valid"):
+                                grade = opp.get("grade")
+                                liq = opp.get("liquidity", 0)
+                                fdv = opp.get("fdv", 0)
+                                buys = opp.get("buys", 0)
+                                sells = opp.get("sells", 0)
+                                vol = opp.get("volume", 0)
+                                symbol = opp.get("symbol", "SMART")
+                                name = opp.get("name", "Token")
+                                url = opp.get("url", f"https://dexscreener.com/solana/{token_address}")
+                                
+                                alert_message = (
+                                    f"🧠⚡ *رصد تقاطع وتجميع المال الذكي (Smart Money)*\n\n"
+                                    f"📌 التقييم: *{grade}*\n"
+                                    f"🪙 التوكن: {name} (`{symbol}`)\n\n"
+                                    f"📊 *مقاييس التدفق والسيولة:*\n"
+                                    f"💧 السيولة المؤمنة: `${liq:,.2f}`\n"
+                                    f"📈 القيمة السوقية (FDV): `${fdv:,.2f}`\n"
+                                    f"⚡ حجم الشراء (5 دقائق): `${vol:,.2f}`\n"
+                                    f"🛒 صفقات الشراء المكثف: `{buys}` شراء 🟢 | البيع: `0` (تكتل محفظي صارم)\n\n"
+                                    f"🔑 *عقد التوكن (للتحليل والدراسة):*\n`{token_address}`\n\n"
+                                    f"🛡️ *روابط التحقق والتحليل الإجباري (قبل اتخاذ قرار الدخول):*\n"
+                                    f"🔗 [DexScreener]({url})\n"
+                                    f"🗺️ [BubbleMaps (فحص توزيع وتركز المحافظ)](https://app.bubblemaps.io/solana/{token_address})\n"
+                                    f"🎯 [GMGN (تتبع سجل محافظ المتداولين الأوائل)](https://gmgn.ai/solana/token/{token_address})"
+                                )
+                                engine_status["last_event"] = alert_message
+                                send_telegram_alert(alert_message)
         except Exception:
             pass
         
-        time.sleep(3)
+        time.sleep(1.2)
 
 @app.on_event("startup")
 def startup_event():
-    t = threading.Thread(target=fetch_robinhood_whale_transfers, daemon=True)
+    t = threading.Thread(target=run_smart_money_engine, daemon=True)
     t.start()
-    print("🚀 Robinhood Chain Whale Tracker Started Successfully!")
+    print("🚀 Smart Money Cluster Sniper Started Successfully!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
