@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Solana Pre-Launch Sniper Initialized Successfully"
+    "last_event": "Elite Smart Money Summary Engine Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Solana Pre-Launch Accumulation Sniper",
+        "engine": "Elite Smart Money Summary Engine",
         "details": engine_status
     }
 
@@ -40,7 +40,57 @@ def send_telegram_alert(message: str):
 
 processed_tokens = set()
 
-def run_sniper_logic():
+def evaluate_smart_money_opportunity(token_address: str) -> dict:
+    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
+    try:
+        res = requests.get(url, timeout=2)
+        if res.status_code == 200:
+            data = res.json()
+            pairs = data.get("pairs", [])
+            if pairs:
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                if not sol_pairs:
+                    return {"valid": False}
+                
+                pair = sol_pairs[0]
+                liq = pair.get("liquidity", {}).get("usd", 0)
+                fdv = pair.get("fdv", 0)
+                
+                txns = pair.get("txns", {})
+                m5 = txns.get("m5", {})
+                buys = m5.get("buys", 0)
+                sells = m5.get("sells", 0)
+                
+                # حساب نسبة السيولة إلى القيمة السوقية (مؤشر على قوة التأسيس)
+                ratio = (liq / fdv) if fdv > 0 else 0
+                
+                symbol = pair.get("baseToken", {}).get("symbol", "ELITE")
+                name = pair.get("baseToken", {}).get("name", "Token")
+                pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
+                
+                # الفلتر الأقوى: شراء قوي، صفر بيع، سيولة أولية ممتازة ونسبة صحية
+                if buys >= 3 and sells == 0 and 2000 <= liq <= 30000:
+                    
+                    # تقييم قوة الفرصة (الخلاصة الذكية)
+                    grade = "🔥 فرصة ذهبية (Grade A+)" if liq >= 5000 and buys >= 5 else "💎 فرصة واعدة (Grade A)"
+                    
+                    return {
+                        "valid": True,
+                        "grade": grade,
+                        "liquidity": liq,
+                        "fdv": fdv,
+                        "buys": buys,
+                        "sells": sells,
+                        "ratio": ratio * 100,
+                        "symbol": symbol,
+                        "name": name,
+                        "url": pair_url
+                    }
+    except Exception:
+        pass
+    return {"valid": False}
+
+def run_elite_summary_engine():
     global processed_tokens
     while True:
         try:
@@ -56,53 +106,49 @@ def run_sniper_logic():
                         token_address = item.get("tokenAddress", "")
                         if token_address and token_address not in processed_tokens:
                             processed_tokens.add(token_address)
-                            if len(processed_tokens) > 2000:
+                            if len(processed_tokens) > 3000:
                                 processed_tokens.clear()
                             
-                            # جلب تفاصيل التوكن
-                            token_url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-                            t_res = requests.get(token_url, timeout=2)
-                            if t_res.status_code == 200:
-                                t_data = t_res.json()
-                                pairs = t_data.get("pairs", [])
-                                if pairs:
-                                    pair = pairs[0]
-                                    liq = pair.get("liquidity", {}).get("usd", 0)
-                                    fdv = pair.get("fdv", 0)
-                                    txns = pair.get("txns", {}).get("m5", {})
-                                    buys = txns.get("buys", 0)
-                                    sells = txns.get("sells", 0)
-                                    
-                                    symbol = pair.get("baseToken", {}).get("symbol", "EARLY")
-                                    name = pair.get("baseToken", {}).get("name", "Token")
-                                    dex_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
-                                    
-                                    # شروط التجميع المبكر واكتتاب المحافظ (شراء بدون بيع وسيولة أولية)
-                                    if buys >= 2 and sells == 0 and 500 <= liq <= 30000:
-                                        msg = (
-                                            f"🚀💎 *رصد اكتتاب وتجميع مبكر (Pre-Launch)*\n\n"
-                                            f"🪙 التوكن: {name} (`{symbol}`)\n"
-                                            f"💧 السيولة: `${liq:,.2f}`\n"
-                                            f"📈 القيمة السوقية: `${fdv:,.2f}`\n"
-                                            f"🛒 شراء: `{buys}` 🟢 | بيع: `0` (احتفاظ تام)\n\n"
-                                            f"🔑 العقد:\n`{token_address}`\n\n"
-                                            f"📊 *روابط الفحص:*\n"
-                                            f"🔗 [DexScreener]({dex_url})\n"
-                                            f"🛡️ [BubbleMaps](https://app.bubblemaps.io/solana/{token_address})\n"
-                                            f"⚡ [GMGN](https://gmgn.ai/solana/token/{token_address})"
-                                        )
-                                        engine_status["last_event"] = msg
-                                        send_telegram_alert(msg)
+                            opp = evaluate_smart_money_opportunity(token_address)
+                            if opp.get("valid"):
+                                grade = opp.get("grade")
+                                liq = opp.get("liquidity", 0)
+                                fdv = opp.get("fdv", 0)
+                                buys = opp.get("buys", 0)
+                                sells = opp.get("sells", 0)
+                                ratio = opp.get("ratio", 0)
+                                symbol = opp.get("symbol", "ELITE")
+                                name = opp.get("name", "Token")
+                                url = opp.get("url", f"https://dexscreener.com/solana/{token_address}")
+                                
+                                # صياغة الخلاصة التنفيذية القوية والجاهزة للقرار
+                                summary_msg = (
+                                    f"🧠⚡ *الخلاصة التنفيذية لمحافظ الأموال الذكية*\n\n"
+                                    f"📌 التقييم: *{grade}*\n"
+                                    f"🪙 التوكن: {name} (`{symbol}`)\n\n"
+                                    f"📊 *المؤشرات المالية والزخم:*\n"
+                                    f"💧 السيولة الأولية: `${liq:,.2f}`\n"
+                                    f"📈 القيمة السوقية: `${fdv:,.2f}`\n"
+                                    f"⚖️ نسبة السيولة للـ FDV: `{ratio:.1f}%`\n"
+                                    f"🛒 عمليات الشراء الصافي: `{buys}` شراء 🟢 | البيع: `0` (احتفاظ وتجميع تام)\n\n"
+                                    f"🔑 *عقد التوكن:*\n`{token_address}`\n\n"
+                                    f"🛡️ *روابط التحقق الإجباري قبل الدخول:*\n"
+                                    f"🔗 [DexScreener]({url})\n"
+                                    f"🗺️ [BubbleMaps (فحص تركز الحيتان)](https://app.bubblemaps.io/solana/{token_address})\n"
+                                    f"⚡ [GMGN (تتبع محافظ الصيد)](https://gmgn.ai/solana/token/{token_address})"
+                                )
+                                engine_status["last_event"] = summary_msg
+                                send_telegram_alert(summary_msg)
         except Exception:
             pass
         
-        time.sleep(2) # مؤقت خفيف لمنع الضغط على السيرفر والطلبات
+        time.sleep(1.5)
 
 @app.on_event("startup")
 def startup_event():
-    t = threading.Thread(target=run_sniper_logic, daemon=True)
+    t = threading.Thread(target=run_elite_summary_engine, daemon=True)
     t.start()
-    print("🚀 Background worker started successfully!")
+    print("🚀 Elite Summary Engine Started Successfully!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
