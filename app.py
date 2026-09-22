@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Ultra Confirmed Smart Money Sniper Active..."
+    "last_event": "Institutional Smart Money & Whale Wallet Tracker Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Ultra Confirmed Smart Money Sniper",
+        "engine": "Institutional Whale & Smart Wallet Tracker",
         "details": engine_status
     }
 
@@ -40,15 +40,15 @@ def send_telegram_alert(message: str):
 
 processed_tokens = set()
 
-def evaluate_ultra_confirmation(token_address: str) -> dict:
+def analyze_whale_accumulation(token_address: str) -> dict:
     url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
     try:
-        res = requests.get(url, timeout=2)
+        res = requests.get(url, timeout=3)
         if res.status_code == 200:
             data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
+                sol_pairs = [p for p in pairs if p.get("chainId"] == "solana"]
                 if not sol_pairs:
                     return {"valid": False}
                 
@@ -61,21 +61,20 @@ def evaluate_ultra_confirmation(token_address: str) -> dict:
                 buys = m5.get("buys", 0)
                 sells = m5.get("sells", 0)
                 
-                # نسبة السيولة إلى القيمة السوقية لصحة الانطلاقة
-                ratio = (liq / fdv) if fdv > 0 else 0
+                # فحص حجم التداولات الكبرى (Whale Volume Check)
+                volume = pair.get("volume", {}).get("m5", 0)
                 
-                symbol = pair.get("baseToken", {}).get("symbol", "ULTRA")
+                symbol = pair.get("baseToken", {}).get("symbol", "WHALE")
                 name = pair.get("baseToken", {}).get("name", "Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
                 
-                # شروط التأكيد القوي جداً للصعود وشيك الانفجار:
-                # 1. عمليات شراء مكثفة (أكثر من أو يساوي 5) لتأكيد بدء الزخم
-                # 2. صفر مبيعات نهائياً لتأكيد سيطرة الحيتان والاحتفاظ التام
-                # 3. سيولة مدروسة بين $3k و $35k لضمان سرعة الصعود
-                if buys >= 5 and sells == 0 and 3000 <= liq <= 35000:
+                # معايير تتبع الحيتان والمحافظ القوية الكبرى:
+                # 1. سيولة أولية قوية تمنع التلاعب ($4,000 إلى $40,000)
+                # 2. عمليات شراء مؤسسية/حيتان مكثفة مع انعدام تام للبيع (sells == 0)
+                # 3. تدفق حجم تداول متميز يؤكد دخول محافظ ثقيلة
+                if buys >= 6 and sells == 0 and 4000 <= liq <= 40000:
                     
-                    # تقييم عالي التأكيد
-                    grade = "🚀🔥 [تأكيد صارم] جاهز للانفجار الصعودي (Ultra Grade A+)"
+                    grade = "🐋🔥 [تتبع حيتان ومحافظ كبرى] سيطرة وتراكم مؤسسي (Elite Whale Grade)"
                     
                     return {
                         "valid": True,
@@ -84,7 +83,7 @@ def evaluate_ultra_confirmation(token_address: str) -> dict:
                         "fdv": fdv,
                         "buys": buys,
                         "sells": sells,
-                        "ratio": ratio * 100,
+                        "volume": volume,
                         "symbol": symbol,
                         "name": name,
                         "url": pair_url
@@ -93,10 +92,11 @@ def evaluate_ultra_confirmation(token_address: str) -> dict:
         pass
     return {"valid": False}
 
-def run_ultra_confirmed_engine():
+def run_whale_tracker_engine():
     global processed_tokens
     while True:
         try:
+            # مراقبة أحدث التوكنات والسيولة المؤسسية في السوق
             trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
             res = requests.get(trending_url, timeout=4)
             if res.status_code == 200:
@@ -112,36 +112,36 @@ def run_ultra_confirmed_engine():
                             if len(processed_tokens) > 3000:
                                 processed_tokens.clear()
                             
-                            opp = evaluate_ultra_confirmation(token_address)
+                            opp = analyze_whale_accumulation(token_address)
                             if opp.get("valid"):
                                 grade = opp.get("grade")
                                 liq = opp.get("liquidity", 0)
                                 fdv = opp.get("fdv", 0)
                                 buys = opp.get("buys", 0)
                                 sells = opp.get("sells", 0)
-                                ratio = opp.get("ratio", 0)
-                                symbol = opp.get("symbol", "ULTRA")
+                                vol = opp.get("volume", 0)
+                                symbol = opp.get("symbol", "WHALE")
                                 name = opp.get("name", "Token")
                                 url = opp.get("url", f"https://dexscreener.com/solana/{token_address}")
                                 
-                                # صياغة تنبيه النخبة المؤكد بدقة متناهية
-                                confirmed_msg = (
-                                    f"💎⚡ *رصد اشارة انطلاقة الصعود المؤكدة*\n\n"
-                                    f"📌 التقييم: *{grade}*\n"
+                                # رسالة التنبيه المخصصة لتتبع الحيتان والمحافظ الكبرى
+                                whale_msg = (
+                                    f"🚨🐋 *رصد حركة محافظ كبرى وحيتان ثقيلة*\n\n"
+                                    f"📌 التصنيف: *{grade}*\n"
                                     f"🪙 التوكن: {name} (`{symbol}`)\n\n"
-                                    f"📊 *بيانات الزخم والتأكيد الفعلي:*\n"
-                                    f"💧 السيولة الحالية: `${liq:,.2f}`\n"
+                                    f"📊 *تحليل تدفق السيولة والمحافظ:*\n"
+                                    f"💧 السيولة المؤمنة: `${liq:,.2f}`\n"
                                     f"📈 القيمة السوقية (FDV): `${fdv:,.2f}`\n"
-                                    f"⚖️ نسبة السيولة: `{ratio:.1f}%`\n"
-                                    f"🛒 عمليات الشراء المكثف: `{buys}` شراء 🟢 | البيع: `0` (تجميع حيتان صارم)\n\n"
-                                    f"🔑 *عقد التوكن (للتحرك الفوري):*\n`{token_address}`\n\n"
-                                    f"🛡️ *روابط التحقق والاعتماد الإجباري قبل الدخول:*\n"
+                                    f"⚡ حجم التداول (5 دقائق): `${vol:,.2f}`\n"
+                                    f"🛒 عمليات شراء الحيتان: `{buys}` شراء 🟢 | البيع: `0` (احتفاظ وتجميع قوي)\n\n"
+                                    f"🔑 *عقد التوكن (للمتابعة الفورية):*\n`{token_address}`\n\n"
+                                    f"🛡️ *روابط التحقق والتدقيق الإجباري بالمحافظ:*\n"
                                     f"🔗 [DexScreener]({url})\n"
-                                    f"🗺️ [BubbleMaps (فحص تركز المحافظ)](https://app.bubblemaps.io/solana/{token_address})\n"
-                                    f"⚡ [GMGN (تتبع حيتان الشراء)](https://gmgn.ai/solana/token/{token_address})"
+                                    f"🗺️ [BubbleMaps (فحص خريطة وتمركز المحافظ الكبرى)](https://app.bubblemaps.io/solana/{token_address})\n"
+                                    f"⚡ [GMGN (تتبع محفظة الحوت والداخلين الأوائل)](https://gmgn.ai/solana/token/{token_address})"
                                 )
-                                engine_status["last_event"] = confirmed_msg
-                                send_telegram_alert(confirmed_msg)
+                                engine_status["last_event"] = whale_msg
+                                send_telegram_alert(whale_msg)
         except Exception:
             pass
         
@@ -149,9 +149,9 @@ def run_ultra_confirmed_engine():
 
 @app.on_event("startup")
 def startup_event():
-    t = threading.Thread(target=run_ultra_confirmed_engine, daemon=True)
+    t = threading.Thread(target=run_whale_tracker_engine, daemon=True)
     t.start()
-    print("🚀 Ultra Confirmed Smart Money Engine Started Successfully!")
+    print("🚀 Institutional Whale Wallet Tracker Started Successfully!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
