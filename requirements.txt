@@ -1,6 +1,2 @@
-fastapi
-uvicorn
-websockets
-solana==0.34.3
-solders==0.21.0
+flask
 requests
