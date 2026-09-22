@@ -48,7 +48,8 @@ def analyze_whale_accumulation(token_address: str) -> dict:
             data = res.json()
             pairs = data.get("pairs", [])
             if pairs:
-                sol_pairs = [p for p in pairs if p.get("chainId"] == "solana"]
+                # تصحيح الخطأ المطبعي وضمان صحة استعلام الشبكة
+                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
                 if not sol_pairs:
                     return {"valid": False}
                 
@@ -61,17 +62,13 @@ def analyze_whale_accumulation(token_address: str) -> dict:
                 buys = m5.get("buys", 0)
                 sells = m5.get("sells", 0)
                 
-                # فحص حجم التداولات الكبرى (Whale Volume Check)
                 volume = pair.get("volume", {}).get("m5", 0)
                 
                 symbol = pair.get("baseToken", {}).get("symbol", "WHALE")
                 name = pair.get("baseToken", {}).get("name", "Token")
                 pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
                 
-                # معايير تتبع الحيتان والمحافظ القوية الكبرى:
-                # 1. سيولة أولية قوية تمنع التلاعب ($4,000 إلى $40,000)
-                # 2. عمليات شراء مؤسسية/حيتان مكثفة مع انعدام تام للبيع (sells == 0)
-                # 3. تدفق حجم تداول متميز يؤكد دخول محافظ ثقيلة
+                # معايير تتبع الحيتان والمحافظ الكبرى بدقة عالية
                 if buys >= 6 and sells == 0 and 4000 <= liq <= 40000:
                     
                     grade = "🐋🔥 [تتبع حيتان ومحافظ كبرى] سيطرة وتراكم مؤسسي (Elite Whale Grade)"
@@ -96,7 +93,6 @@ def run_whale_tracker_engine():
     global processed_tokens
     while True:
         try:
-            # مراقبة أحدث التوكنات والسيولة المؤسسية في السوق
             trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
             res = requests.get(trending_url, timeout=4)
             if res.status_code == 200:
@@ -124,7 +120,6 @@ def run_whale_tracker_engine():
                                 name = opp.get("name", "Token")
                                 url = opp.get("url", f"https://dexscreener.com/solana/{token_address}")
                                 
-                                # رسالة التنبيه المخصصة لتتبع الحيتان والمحافظ الكبرى
                                 whale_msg = (
                                     f"🚨🐋 *رصد حركة محافظ كبرى وحيتان ثقيلة*\n\n"
                                     f"📌 التصنيف: *{grade}*\n"
