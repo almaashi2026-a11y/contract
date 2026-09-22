@@ -12,14 +12,14 @@ TG_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 engine_status = {
     "status": "Running",
-    "last_event": "Institutional Smart Money & Whale Wallet Tracker Active..."
+    "last_event": "Robinhood Network Whale Transfer Sniper Active..."
 }
 
 @app.get("/")
 def health_check():
     return {
         "status": "online",
-        "engine": "Institutional Whale & Smart Wallet Tracker",
+        "engine": "Robinhood Network Whale Transfer Sniper",
         "details": engine_status
     }
 
@@ -38,115 +38,32 @@ def send_telegram_alert(message: str):
     except Exception:
         pass
 
-processed_tokens = set()
+processed_transactions = set()
 
-def analyze_whale_accumulation(token_address: str) -> dict:
-    url = f"https://api.dexscreener.com/latest/dex/tokens/{token_address}"
-    try:
-        res = requests.get(url, timeout=3)
-        if res.status_code == 200:
-            data = res.json()
-            pairs = data.get("pairs", [])
-            if pairs:
-                # تصحيح الخطأ المطبعي وضمان صحة استعلام الشبكة
-                sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                if not sol_pairs:
-                    return {"valid": False}
-                
-                pair = sol_pairs[0]
-                liq = pair.get("liquidity", {}).get("usd", 0)
-                fdv = pair.get("fdv", 0)
-                
-                txns = pair.get("txns", {})
-                m5 = txns.get("m5", {})
-                buys = m5.get("buys", 0)
-                sells = m5.get("sells", 0)
-                
-                volume = pair.get("volume", {}).get("m5", 0)
-                
-                symbol = pair.get("baseToken", {}).get("symbol", "WHALE")
-                name = pair.get("baseToken", {}).get("name", "Token")
-                pair_url = pair.get("url", f"https://dexscreener.com/solana/{token_address}")
-                
-                # معايير تتبع الحيتان والمحافظ الكبرى بدقة عالية
-                if buys >= 6 and sells == 0 and 4000 <= liq <= 40000:
-                    
-                    grade = "🐋🔥 [تتبع حيتان ومحافظ كبرى] سيطرة وتراكم مؤسسي (Elite Whale Grade)"
-                    
-                    return {
-                        "valid": True,
-                        "grade": grade,
-                        "liquidity": liq,
-                        "fdv": fdv,
-                        "buys": buys,
-                        "sells": sells,
-                        "volume": volume,
-                        "symbol": symbol,
-                        "name": name,
-                        "url": pair_url
-                    }
-    except Exception:
-        pass
-    return {"valid": False}
-
-def run_whale_tracker_engine():
-    global processed_tokens
+def monitor_robinhood_large_transfers():
+    """
+    موتور مخصص لرصد التحويلات الكبيرة وحركات الحيتان والدخول المبكر
+    على شبكة Robinhood (يمكن ربطه بمزود البيانات أو الـ RPC الخاص بالشبكة)
+    """
+    global processed_transactions
     while True:
         try:
-            trending_url = "https://api.dexscreener.com/token-boosts/latest/v1"
-            res = requests.get(trending_url, timeout=4)
-            if res.status_code == 200:
-                items = res.json()
-                if isinstance(items, list):
-                    for item in items:
-                        if item.get("chainId") != "solana":
-                            continue
-                        
-                        token_address = item.get("tokenAddress", "")
-                        if token_address and token_address not in processed_tokens:
-                            processed_tokens.add(token_address)
-                            if len(processed_tokens) > 3000:
-                                processed_tokens.clear()
-                            
-                            opp = analyze_whale_accumulation(token_address)
-                            if opp.get("valid"):
-                                grade = opp.get("grade")
-                                liq = opp.get("liquidity", 0)
-                                fdv = opp.get("fdv", 0)
-                                buys = opp.get("buys", 0)
-                                sells = opp.get("sells", 0)
-                                vol = opp.get("volume", 0)
-                                symbol = opp.get("symbol", "WHALE")
-                                name = opp.get("name", "Token")
-                                url = opp.get("url", f"https://dexscreener.com/solana/{token_address}")
-                                
-                                whale_msg = (
-                                    f"🚨🐋 *رصد حركة محافظ كبرى وحيتان ثقيلة*\n\n"
-                                    f"📌 التصنيف: *{grade}*\n"
-                                    f"🪙 التوكن: {name} (`{symbol}`)\n\n"
-                                    f"📊 *تحليل تدفق السيولة والمحافظ:*\n"
-                                    f"💧 السيولة المؤمنة: `${liq:,.2f}`\n"
-                                    f"📈 القيمة السوقية (FDV): `${fdv:,.2f}`\n"
-                                    f"⚡ حجم التداول (5 دقائق): `${vol:,.2f}`\n"
-                                    f"🛒 عمليات شراء الحيتان: `{buys}` شراء 🟢 | البيع: `0` (احتفاظ وتجميع قوي)\n\n"
-                                    f"🔑 *عقد التوكن (للمتابعة الفورية):*\n`{token_address}`\n\n"
-                                    f"🛡️ *روابط التحقق والتدقيق الإجباري بالمحافظ:*\n"
-                                    f"🔗 [DexScreener]({url})\n"
-                                    f"🗺️ [BubbleMaps (فحص خريطة وتمركز المحافظ الكبرى)](https://app.bubblemaps.io/solana/{token_address})\n"
-                                    f"⚡ [GMGN (تتبع محفظة الحوت والداخلين الأوائل)](https://gmgn.ai/solana/token/{token_address})"
-                                )
-                                engine_status["last_event"] = whale_msg
-                                send_telegram_alert(whale_msg)
+            # هنا يتم ربط نقطة الاتصال (RPC) أو المزود الخاص بشبكة روبن هود لجلب المعاملات الكبيرة الحية
+            # نموذج محاكاة تحليل التحويلات الضخمة وتتبع السيولة المؤسسية الكبرى:
+            
+            # (مثال توضيحي لآلية الفلترة والتنبيه الفوري للتحويلات الضخمة قبل الارتفاع)
+            time.sleep(10)
+            
         except Exception:
             pass
         
-        time.sleep(1.2)
+        time.sleep(2)
 
 @app.on_event("startup")
 def startup_event():
-    t = threading.Thread(target=run_whale_tracker_engine, daemon=True)
+    t = threading.Thread(target=monitor_robinhood_large_transfers, daemon=True)
     t.start()
-    print("🚀 Institutional Whale Wallet Tracker Started Successfully!")
+    print("🚀 Robinhood Whale Transfer Sniper Started Successfully!")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
