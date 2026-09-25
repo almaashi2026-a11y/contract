@@ -1,6 +1,5 @@
-# smart_money_tracker.py
-# متتبع المال الذكي - متعدد السلاسل (Solana + EVM + Tron)
-# تشغيل واحد: worker + dashboard على Render
+# smart_alpha_sniper.py
+# بوت صيد عقود Alpha والـ Pump على شبكة سولانا - مستوى VIP
 
 import os
 import time
@@ -15,176 +14,85 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-# السلاسل المدعومة
-CHAINS = {
-    "solana": {"dexscreener_id": "solana"},
-    "ethereum": {"dexscreener_id": "ethereum"},
-    "bsc": {"dexscreener_id": "bsc"},
-    "base": {"dexscreener_id": "base"},
-    "arbitrum": {"dexscreener_id": "arbitrum"},
-    "polygon": {"dexscreener_id": "polygon"},
-    "tron": {"dexscreener_id": "tron"},
-}
-
-SCAN_INTERVAL = 60          # ثانية بين كل دورة فحص
-MIN_SMART_WALLETS = 2       # أقل عدد محافظ لاعتبارها إشارة قوية
-MIN_LIQUIDITY_USD = 15000   # الحد الأدنى للسيولة بالدولار
-WALLET_WIN_RATE_THRESHOLD = 0.55  # نسبة النجاح لاعتبار المحفظة "ذكية"
+SCAN_INTERVAL = 30          # فحص سريع كل 30 ثانية لاصطياد الفرص فوراً
+MIN_LIQUIDITY_USD = 5000    # حد أدنى للسيولة للتأكد من جدية المشروع
+MAX_FDV_USD = 500000        # التركيز على المشاريع ذات القيمة السوقية المنخفضة للانفجار
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("smart_money")
+log = logging.getLogger("alpha_sniper")
 
-wallet_cache = {}       # ذاكرة مؤقتة لتقييم المحافظ
-alerted_tokens = {}     # لتجنب تكرار التنبيهات لنفس التوكن
-recent_signals = []     # تخزين آخر الإشارات لعرضها في لوحة التحكم
+alerted_tokens = {}
+recent_signals = []
 
-# ==================== طبقة جلب البيانات ====================
+# ==================== جلب التوكنات الجديدة والترند (Solana Pump & Raydium) ====================
 
-def get_trending_tokens(chain_id):
-    """جلب التوكنات النشطة والترند من Dexscreener لسلسلة معينة"""
+def get_solana_alpha_tokens():
+    """جلب أحدث التوكنات والترند النشط على شبكة سولانا من Dexscreener"""
     try:
-        url = f"https://api.dexscreener.com/latest/dex/search?q={chain_id}"
+        url = "https://api.dexscreener.com/latest/dex/search?q=solana"
         r = requests.get(url, timeout=10)
         r.raise_for_status()
         data = r.json()
         pairs = data.get("pairs", []) or []
-        filtered = [
-            p for p in pairs
-            if p.get("chainId") == chain_id
-            and float((p.get("liquidity") or {}).get("usd") or 0) >= MIN_LIQUIDITY_USD
-        ]
+        
+        # تصفية وتجهيز أزواج سولانا المطابقة لمعايير الانفجار
+        filtered = []
+        for p in pairs:
+            if p.get("chainId") == "solana":
+                liq = float((p.get("liquidity") or {}).get("usd") or 0)
+                fdv = float(p.get("fdv") or 0)
+                
+                # شروط الدخول المبكر: سيولة جيدة وقيمة سوقية منخفضة قابلة للانفجار الضخم
+                if MIN_LIQUIDITY_USD <= liq <= 100000 and (0 < fdv <= MAX_FDV_USD):
+                    filtered.append(p)
+                    
+                # التركيز حسب حجم التداول في آخر 5 دقائق أو ساعة
         filtered.sort(key=lambda p: float((p.get("volume") or {}).get("h1") or 0), reverse=True)
-        return filtered[:25]
+        return filtered[:20]
     except Exception as e:
-        log.warning(f"خطأ بجلب الترند لـ {chain_id}: {e}")
+        log.warning(f"خطأ بجلب بيانات سولانا Alpha: {e}")
         return []
 
-def get_token_holders(chain_id, token_address):
-    """جلب قائمة الحائزين أو تفاعلات العقود حسب الشبكة"""
-    try:
-        if chain_id == "solana":
-            return _get_solana_holders(token_address)
-        elif chain_id == "tron":
-            return _get_tron_holders(token_address)
-        else:
-            return _get_evm_holders(chain_id, token_address)
-    except Exception as e:
-        log.warning(f"خطأ بجلب الحائزين {token_address} على {chain_id}: {e}")
-        return []
+# ==================== إرسال تنبيه الـ VIP على التيليجرام ====================
 
-def _get_solana_holders(token_address):
-    helius_key = os.environ.get("HELIUS_API_KEY", "")
-    if not helius_key:
-        return []
-    rpc_url = f"https://mainnet.helius-rpc.com/?api-key={helius_key}"
-    payload = {
-        "jsonrpc": "2.0", "id": 1,
-        "method": "getTokenLargestAccounts",
-        "params": [token_address]
-    }
-    try:
-        r = requests.post(rpc_url, json=payload, timeout=8)
-        result = r.json().get("result", {}).get("value", [])
-        return [acc["address"] for acc in result[:15]]
-    except Exception:
-        return []
-
-def _get_evm_holders(chain_id, token_address):
-    api_key = os.environ.get(f"{chain_id.upper()}_API_KEY", "")
-    explorer_base = {
-        "ethereum": "https://api.etherscan.io/api",
-        "bsc": "https://api.bscscan.com/api",
-        "base": "https://api.basescan.org/api",
-        "arbitrum": "https://api.arbiscan.io/api",
-        "polygon": "https://api.polygonscan.com/api",
-    }.get(chain_id)
-    if not explorer_base or not api_key:
-        return []
-    url = f"{explorer_base}?module=token&action=tokenholderlist&contractaddress={token_address}&apikey={api_key}"
-    try:
-        r = requests.get(url, timeout=8)
-        result = r.json().get("result", [])
-        return [h["TokenHolderAddress"] for h in result[:15]] if isinstance(result, list) else []
-    except Exception:
-        return []
-
-def _get_tron_holders(token_address):
-    url = f"https://apilist.tronscanapi.com/api/token_trc20/holders?contract_address={token_address}&limit=15"
-    try:
-        r = requests.get(url, timeout=8)
-        data = r.json()
-        return [h["address"] for h in data.get("trc20_tokens", [])[:15]]
-    except Exception:
-        return []
-
-def get_wallet_win_rate(chain_id, wallet_address):
-    """تقييم سجل المحفظة (يمكن ربطه لاحقاً بـ GMGN أو Nansen API)"""
-    cache_key = f"{chain_id}:{wallet_address}"
-    cached = wallet_cache.get(cache_key)
-    if cached and (datetime.utcnow() - cached["last_checked"]) < timedelta(hours=6):
-        return cached["win_rate"]
-
-    # قيمة افتراضية متوازنة في حال عدم توفر مزود مدفوع
-    win_rate = 0.60  
-    wallet_cache[cache_key] = {"win_rate": win_rate, "last_checked": datetime.utcnow()}
-    return win_rate
-
-# ==================== منطق الرصد والتنبيه ====================
-
-def scan_chain(chain_id):
-    tokens = get_trending_tokens(CHAINS[chain_id]["dexscreener_id"])
-    for token in tokens:
-        token_address = token.get("baseToken", {}).get("address")
-        token_symbol = token.get("baseToken", {}).get("symbol", "?")
-        if not token_address:
-            continue
-
-        holders = get_token_holders(chain_id, token_address)
-        smart_wallets = []
-        for wallet in holders:
-            win_rate = get_wallet_win_rate(chain_id, wallet)
-            if win_rate >= WALLET_WIN_RATE_THRESHOLD:
-                smart_wallets.append(wallet)
-
-        if len(smart_wallets) >= MIN_SMART_WALLETS:
-            last_alert = alerted_tokens.get(token_address)
-            if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=4):
-                continue  # منع التكرار السريع لنفس التوكن
-
-            send_alert(chain_id, token, token_symbol, token_address, smart_wallets)
-            alerted_tokens[token_address] = datetime.utcnow()
-
-def send_alert(chain_id, token, symbol, token_address, smart_wallets):
-    price = token.get("priceUsd", "?")
-    liquidity = (token.get("liquidity") or {}).get("usd", 0)
-    volume_h1 = (token.get("volume") or {}).get("h1", 0)
-    pair_url = token.get("url", f"https://dexscreener.com/{chain_id}/{token_address}")
+def send_vip_alert(token):
+    symbol = token.get("baseToken", {}).get("symbol", "UNKNOWN")
+    name = token.get("baseToken", {}).get("name", "Meme Token")
+    token_address = token.get("baseToken", {}).get("address", "")
+    price = token.get("priceUsd", "0")
+    fdv = float(token.get("fdv") or 0)
+    liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
+    pair_url = token.get("url", f"https://dexscreener.com/solana/{token_address}")
+    
+    # تنسيق القيمة السوقية بشكل جميل (مثلاً 3.4M أو 450K)
+    if fdv >= 1000000:
+        fdv_str = f"{fdv / 1000000:.1f}M"
+    else:
+        fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"🧠💎 *إشارة تقاطع وتجميع المال الذكي*\n\n"
-        f"🌐 الشبكة: `{chain_id.upper()}`\n"
-        f"🪙 العملة: *{symbol}*\n"
-        f"👥 عدد المحافظ الذكية المرصودة: `{len(smart_wallets)}`\n"
-        f"💲 السعر: `${price}`\n"
-        f"💧 السيولة: `${liquidity:,.0f}`\n"
-        f"⚡ حجم التداول (1س): `${volume_h1:,.0f}`\n\n"
-        f"🔑 *العقد:*\n`{token_address}`\n\n"
-        f"🛡️ *روابط التحقق السريع:*\n"
+        f"🚨🔥 **MR YÚMĂ CHAD ☎️ PRIVATE (CALLS):**\n"
+        f"Everyone get ready imma drop a free ca SOLANA chain form the vip group turn on your notifications\n\n"
+        f"🪙 **التوكن:** {name} (`{symbol}`)\n"
+        f"🚀 **القيمة السوقية (FDV):** `{fdv_str} 🚀🚀`\n"
+        f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
+        f"🔑 **عقد التوكن (CA):**\n`{token_address}`\n\n"
+        f"🛡️ **روابط الفحص والتنفيذ السريع:**\n"
         f"🔗 [DexScreener]({pair_url})\n"
-        f"🎯 [GMGN (تتبع المحافظ)](https://gmgn.ai/{chain_id}/token/{token_address})\n"
-        f"🗺️ [BubbleMaps (فحص التمركز)](https://app.bubblemaps.io/{chain_id}/{token_address})"
+        f"🎯 [GMGN (تتبع الأوائل)](https://gmgn.ai/solana/token/{token_address})\n"
+        f"🗺️ [BubbleMaps (تحليل المحافظ)](https://app.bubblemaps.io/solana/{token_address})"
     )
 
     signal = {
-        "chain": chain_id, "symbol": symbol, "smart_wallets": len(smart_wallets),
-        "price": price, "liquidity": liquidity, "url": pair_url,
+        "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
+        "address": token_address, "url": pair_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
     recent_signals.insert(0, signal)
     if len(recent_signals) > 50:
         recent_signals.pop()
 
-    log.info(f"إشارة جديدة: {symbol} على {chain_id} - {len(smart_wallets)} محافظ")
+    log.info(f"إشارة VIP جديدة: {symbol} بقيمة {fdv_str}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -198,16 +106,29 @@ def send_alert(chain_id, token, symbol, token_address, smart_wallets):
         except Exception as e:
             log.warning(f"فشل إرسال تنبيه Telegram: {e}")
 
-def run_scanner_loop():
+def run_sniper_loop():
     while True:
-        for chain_id in CHAINS:
-            try:
-                scan_chain(chain_id)
-            except Exception as e:
-                log.error(f"خطأ بفحص {chain_id}: {e}")
+        try:
+            tokens = get_solana_alpha_tokens()
+            for token in tokens:
+                token_address = token.get("baseToken", {}).get("address", "")
+                if not token_address:
+                    continue
+                
+                # عدم تكرار التنبيه لنفس العقد خلال ساعتين
+                last_alert = alerted_tokens.get(token_address)
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
+                    continue
+                
+                send_vip_alert(token)
+                alerted_tokens[token_address] = datetime.utcnow()
+                time.sleep(2) # فاصل زمني بسيط بين التنبيهات
+        except Exception as e:
+            log.error(f"خطأ في حلقة الرصد: {e}")
+            
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم (Dashboard) ====================
+# ==================== لوحة التحكم المرئية (Dashboard) ====================
 
 app = Flask(__name__)
 
@@ -216,34 +137,33 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>متتبع المال الذكي - لوحة الإشارات</title>
-<meta http-equiv="refresh" content="30">
+<title>Alpha Sniper VIP - لوحة الصيد</title>
+<meta http-equiv="refresh" content="20">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
-  h1 { color: #4ade80; }
+  h1 { color: #facc15; }
   table { width: 100%; border-collapse: collapse; margin-top: 20px; }
   th, td { padding: 12px; text-align: right; border-bottom: 1px solid #2a2d34; }
   th { color: #888; font-weight: normal; }
   tr:hover { background: #1a1d24; }
-  .chain { color: #60a5fa; font-weight: bold; }
+  .ca { color: #38bdf8; font-family: monospace; font-size: 14px; }
   a { color: #4ade80; text-decoration: none; }
   a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-  <h1>🐋 متتبع المال الذكي - لوحة الرصد الحية</h1>
-  <p>يتم تحديث البيانات تلقائياً كل 30 ثانية | إجمالي الإشارات المسجلة: {{ signals|length }}</p>
+  <h1>🔥 صقر صید Alpha (VIP Calls) - سولانا</h1>
+  <p>يتم تحديث الإشارات تلقائياً كل 20 ثانية | إجمالي الإشارات: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>الشبكة</th><th>العملة</th><th>المحافظ الذكية</th><th>السعر</th><th>السيولة</th><th>رابط الفحص</th></tr>
+    <tr><th>الوقت (UTC)</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
-      <td class="chain">{{ s.chain|upper }}</td>
       <td><b>{{ s.symbol }}</b></td>
-      <td>{{ s.smart_wallets }}</td>
-      <td>${{ s.price }}</td>
+      <td style="color: #facc15;">{{ s.fdv }} 🚀</td>
       <td>${{ "%.0f"|format(s.liquidity) }}</td>
-      <td><a href="{{ s.url }}" target="_blank">فتح المنصة ↗</a></td>
+      <td class="ca">{{ s.address }}</td>
+      <td><a href="{{ s.url }}" target="_blank">فحص ↗</a></td>
     </tr>
     {% endfor %}
   </table>
@@ -266,7 +186,7 @@ def health():
 # ==================== التشغيل الرئيسي ====================
 
 if __name__ == "__main__":
-    scanner_thread = threading.Thread(target=run_scanner_loop, daemon=True)
-    scanner_thread.start()
+    t = threading.Thread(target=run_sniper_loop, daemon=True)
+    t.start()
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
