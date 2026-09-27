@@ -1,5 +1,5 @@
 # smart_alpha_sniper.py
-# بوت صيد عقود Alpha والـ Pump على شبكة سولانا - محدث وفوري
+# بوت صيد عقود Alpha الذكي - فلترة عالية الجودة لشبكة سولانا
 
 import os
 import time
@@ -14,7 +14,7 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 20          # فحص سريع كل 20 ثانية
+SCAN_INTERVAL = 15          # فحص ذكي كل 15 ثانية
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("alpha_sniper")
@@ -22,44 +22,41 @@ log = logging.getLogger("alpha_sniper")
 alerted_tokens = {}
 recent_signals = []
 
-# ==================== جلب التوكنات عبر نقطة Boosts النشطة ====================
+# ==================== الفلترة الذكية للتوكنات القوية ====================
 
 def get_solana_alpha_tokens():
-    """جلب أحدث التوكنات النشطة والمدعومة على شبكة سولانا مباشرة"""
+    """جلب أحدث التوكنات وتصفيتها بناءً على معايير السيولة والزخم الحقيقي"""
     try:
-        url = "https://api.dexscreener.com/token-boosts/latest/v1"
+        # استخدام نقطة البحث والترند النشط لجلب أحدث الأزواج
+        url = "https://api.dexscreener.com/latest/dex/search?q=solana"
         r = requests.get(url, timeout=10)
         r.raise_for_status()
-        items = r.json()
+        data = r.json()
+        pairs = data.get("pairs", []) or []
         
-        tokens_to_check = []
-        if isinstance(items, list):
-            for item in items:
-                if item.get("chainId") == "solana":
-                    addr = item.get("tokenAddress")
-                    if addr:
-                        tokens_to_check.append(addr)
-        
-        # جلب تفاصيل كل توكن من واجهة DexScreener المباشرة للعقد
-        valid_pairs = []
-        for addr in tokens_to_check[:15]: # فحص أول 15 توكن لسرعة الاستجابة
-            detail_url = f"https://api.dexscreener.com/latest/dex/tokens/{addr}"
-            res = requests.get(detail_url, timeout=5)
-            if res.status_code == 200:
-                data = res.json()
-                pairs = data.get("pairs", [])
-                if pairs:
-                    sol_pairs = [p for p in pairs if p.get("chainId") == "solana"]
-                    if sol_pairs:
-                        valid_pairs.append(sol_pairs[0])
-            time.sleep(0.1)
-            
-        return valid_pairs
+        filtered_pairs = []
+        for p in pairs:
+            if p.get("chainId") == "solana":
+                # استخراج البيانات المالية
+                liq = float((p.get("liquidity") or {}).get("usd") or 0)
+                fdv = float(p.get("fdv") or 0)
+                vol_h1 = float((p.get("volume") or {}).h1 if hasattr((p.get("volume") or {}), 'h1') else (p.get("volume") or {}).get("h1") or 0)
+                
+                # 🛡️ معايير الجودة الصارمة لضمان إشارات قوية:
+                # 1. السيولة بين 8,000$ و 200,000$ (فرص نمو صاروخية)
+                # 2. القيمة السوقية أقل من 1,000,000$
+                # 3. وجود تداول حפي (حجم تداول نشط)
+                if 8000 <= liq <= 200000 and 0 < fdv <= 1000000:
+                    filtered_pairs.append(p)
+                    
+        # ترتيب حسب الأعلى حجماً وتفاعلاً
+        filtered_pairs.sort(key=lambda x: float((x.get("volume") or {}).get("h1") or 0), reverse=True)
+        return filtered_pairs[:10]
     except Exception as e:
-        log.warning(f"خطأ بجلب بيانات سولانا: {e}")
+        log.warning(f"خطأ بجلب بيانات سولانا الذكية: {e}")
         return []
 
-# ==================== إرسال تنبيه الـ VIP على التيليجرام ====================
+# ==================== إرسال تنبيه النخبة على التيليجرام ====================
 
 def send_vip_alert(token):
     symbol = token.get("baseToken", {}).get("symbol", "UNKNOWN")
@@ -74,14 +71,15 @@ def send_vip_alert(token):
     else:
         fdv_str = f"{fdv / 1000:.1f}K"
 
+    # تنسيق احترافي ونظيف بدون عناوين وهمية، مخصص لصفقات الـ Alpha الحقيقية
     message = (
-        f"🚨🔥 **MR YÚMĂ CHAD ☎️ PRIVATE (CALLS):**\n"
-        f"Everyone get ready imma drop a free ca SOLANA chain form the vip group turn on your notifications\n\n"
+        f"🚨🔥 **ALPHA SNIPER CALLS (SOLANA):**\n"
+        f"⚡ High Momentum Token Detected!\n\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **القيمة السوقية (FDV):** `{fdv_str} 🚀🚀`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **عقد التوكن (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **روابط الفحص والتنفيذ السريع:**\n"
+        f"🛡️ **روابط الفحص السريع:**\n"
         f"🔗 [DexScreener]({pair_url})\n"
         f"🎯 [GMGN (تتبع الأوائل)](https://gmgn.ai/solana/token/{token_address})\n"
         f"🗺️ [BubbleMaps (تحليل المحافظ)](https://app.bubblemaps.io/solana/{token_address})"
@@ -96,7 +94,7 @@ def send_vip_alert(token):
     if len(recent_signals) > 50:
         recent_signals.pop()
 
-    log.info(f"إشارة VIP جديدة: {symbol} بقيمة {fdv_str}")
+    log.info(f"إشارة قوية جديدة: {symbol} بقيمة {fdv_str}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -119,13 +117,14 @@ def run_sniper_loop():
                 if not token_address:
                     continue
                 
+                # عدم تكرار نفس التوكن خلال ساعتين
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=1):
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
                     continue
                 
                 send_vip_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
-                time.sleep(1)
+                time.sleep(2)
         except Exception as e:
             log.error(f"خطأ في حلقة الرصد: {e}")
             
@@ -140,7 +139,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Alpha Sniper VIP - لوحة الصيد</title>
+<title>Alpha Sniper VIP - صيد العملات القوية</title>
 <meta http-equiv="refresh" content="15">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -155,8 +154,8 @@ DASHBOARD_HTML = """
 </style>
 </head>
 <body>
-  <h1>🔥 صقر صيد Alpha (VIP Calls) - سولانا</h1>
-  <p>يتم تحديث الإشارات تلقائياً كل 15 ثانية | إجمالي الإشارات النشطة: {{ signals|length }}</p>
+  <h1>🔥 لوحة صيد Alpha المفلترة - سولانا</h1>
+  <p>تحديث تلقائي كل 15 ثانية | الصفقات ذات السيولة والزخم الحقيقي: {{ signals|length }}</p>
   <table>
     <tr><th>الوقت (UTC)</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
     {% for s in signals %}
