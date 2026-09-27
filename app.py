@@ -1,5 +1,5 @@
-# jev_alpha_trader_instant.py
-# بوت صيد Alpha متعدد السلاسل مع رصد التغير الفوري اللحظي (5 دقائق الأولى)
+# instant_genesis_sniper.py
+# بوت صيد الألفا اللحظي - جلب الأزواج الجديدة فور إنشائها (Real-Time New Pairs)
 
 import os
 import time
@@ -14,86 +14,79 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 10          # فحص أسرع كل 10 ثوانٍ لالتقاط البدايات اللحظية
+SCAN_INTERVAL = 5           # فحص سريع جداً كل 5 ثوانٍ لرصد أحدث التوكنات
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("jev_instant_sniper")
+log = logging.getLogger("genesis_sniper")
 
 alerted_tokens = {}
 recent_signals = []
 
-SUPPORTED_CHAINS = ["solana", "ethereum", "base", "arbitrum", "bsc"]
+# ==================== جلب أحدث الأزواج اللحظية مباشرة ====================
 
-# ==================== طبقة اتخاذ القرار الفوري (Instant Jev Decision Gate) ====================
-
-def jev_decision_engine(token):
-    """
-    طبقة قرار سريعة تعتمد على الزخم الفوري (الـ 5 دقائق الأولى) للالتقاط المبكر جداً.
-    """
-    try:
-        liq = float((token.get("liquidity") or {}).get("usd") or 0)
-        fdv = float(token.get("fdv") or 0)
-        
-        price_change = token.get("priceChange", {})
-        # الاعتماد على التغير خلال 5 دقائق للرصد اللحظي السريع
-        m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
-        
-        # 1. شروط السيولة الآمنة
-        if not (2000 <= liq <= 400000):
-            return False, "سيولة غير مناسبة"
-            
-        # 2. القيمة السوقية المقبولة
-        if not (0 < fdv <= 2000000):
-            return False, "قيمة سوقية تتجاوز الحد المسموح"
-            
-        # 3. الزخم الفوري في أول 5 دقائق (صعود إيجابي سريع)
-        if m5_change <= 2.0:
-            return False, "لا يوجد زخم صاعد كافٍ في الدقائق الخمس الأولى"
-            
-        return True, "تم اجتياز القرار الفوري بنجاح"
-    except Exception as e:
-        return False, f"خطأ في تقييم القرار: {str(e)}"
-
-# ==================== جلب ورصد التوكنات لحظياً ====================
-
-def fetch_and_evaluate_tokens():
-    """جلب الأزواج وتطبيق قرار Jev الفوري عليها بناءً على الـ 5 دقائق الأولى"""
+def get_latest_genesis_tokens():
+    """جلب أحدث الأزواج المضافة في العالم لحظياً وتصفيتها"""
     approved_tokens = []
     
-    for chain in SUPPORTED_CHAINS:
-        try:
-            url = f"https://api.dexscreener.com/latest/dex/search?q={chain}"
-            r = requests.get(url, timeout=8)
-            if r.status_code != 200:
-                continue
-            data = r.json()
-            pairs = data.get("pairs", []) or []
+    try:
+        # استخدام نقطة النهاية العامة لأحدث التوكنات أو البحث المباشر للجديد
+        url = "https://api.dexscreener.com/latest/dex/tokens/latest"
+        # إذا لم تتوفر، نستخدم جلب الـ Boosts أو الـ Latest Profiles
+        r = requests.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=6)
+        
+        if r.status_code == 200:
+            profiles = r.json() or []
+            # استخراج العناوين للتحقق السريع منها عبر DexScreener pairs API
+            addresses = [p.get("tokenAddress") for p in profiles if p.get("tokenAddress")]
             
-            for p in pairs:
-                if p.get("chainId") == chain:
-                    passed, reason = jev_decision_engine(p)
-                    if passed:
-                        approved_tokens.append(p)
-            time.sleep(0.2)
-        except Exception as e:
-            log.warning(f"خطأ في فحص سلسلة {chain}: {e}")
-            
-    # ترتيب حسب أعلى تغير فوري في الـ 5 دقائق الأولى (الأسرع انطلاقاً)
-    approved_tokens.sort(key=lambda x: float((x.get("priceChange", {}) or {}).get("m5") or 0), reverse=True)
+            # جلب تفاصيل الأزواج لهذه العناوين الجديدة فوراً
+            for addr in addresses[:15]:
+                try:
+                    pair_r = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{addr}", timeout=4)
+                    if pair_r.status_code == 200:
+                        data = pair_r.json()
+                        pairs = data.get("pairs", []) or []
+                        for p in pairs:
+                            liq = float((p.get("liquidity") or {}).get("usd") or 0)
+                            fdv = float(p.get("fdv") or 0)
+                            
+                            # شروط دقيقة للسيولة والقيمة السوقية للعملات الناشئة جداً
+                            if 1000 <= liq <= 500000 and 0 < fdv <= 1000000:
+                                approved_tokens.append(p)
+                    time.sleep(0.1)
+                except:
+                    continue
+        
+        # طريقة بديلة احتياطية لضمان عدم توقف الفحص اللحظي
+        if not approved_tokens:
+            fallback_url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+            rf = requests.get(fallback_url, timeout=6)
+            if rf.status_code == 200:
+                pairs = rf.json().get("pairs", []) or []
+                for p in pairs:
+                    # اختيار العملات ذات الإنشاء الأحدث أو النشاط المبكر
+                    pair_created = p.get("pairCreatedAt", 0)
+                    now_ts = time.time() * 1000
+                    # إذا كانت منشأة في آخر ساعتين
+                    if pair_created and (now_ts - pair_created < 7200000):
+                        liq = float((p.get("liquidity") or {}).get("usd") or 0)
+                        if 1000 <= liq <= 300000:
+                            approved_tokens.append(p)
+
+    except Exception as e:
+        log.error(f"خطأ في جلب التوكنات اللحظية: {e}")
+        
     return approved_tokens[:10]
 
-# ==================== إرسال التنبيهات وإدارة الصفقات ====================
+# ==================== إرسال التنبيهات الفورية ====================
 
-def send_jev_alert(token):
+def send_genesis_alert(token):
     chain = token.get("chainId", "unknown").upper()
     symbol = token.get("baseToken", {}).get("symbol", "UNKNOWN")
     name = token.get("baseToken", {}).get("name", "Token")
     token_address = token.get("baseToken", {}).get("address", "")
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
-    
-    price_change = token.get("priceChange", {})
-    m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
     
     pair_url = token.get("url", f"https://dexscreener.com/{token.get('chainId', 'solana')}/{token_address}")
     
@@ -103,22 +96,21 @@ def send_jev_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"⚡🚀 **INSTANT JEV BREAKOUT ({chain})**\n"
-        f"🟢 Early Momentum Detected (First 5m)\n\n"
+        f"⚡🚨 **GENESIS NEW PAIR ({chain})**\n"
+        f"🔥 Fresh Token Launched (Instant Catch)\n\n"
         f"🌐 **السلسلة:** `{chain}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **القيمة السوقية (FDV):** `{fdv_str} 🚀`\n"
-        f"📈 **التغير اللحظي (5m):** `+{m5_change:.1f}% 🔥`\n"
-        f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
+        f"💧 **السيولة الأولية:** `${liquidity:,.0f}`\n\n"
         f"🔑 **عقد التوكن (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **روابط الفحص والتتبع:**\n"
+        f"🛡️ **روابط الفحص الفوري والتنفيذ:**\n"
         f"🔗 [DexScreener]({pair_url})\n"
-        f"🎯 [GMGN (صائدي الأوائل)](https://gmgn.ai/{token.get('chainId', 'solana')}/token/{token_address})\n"
+        f"🎯 [GMGN (الأوائل)](https://gmgn.ai/{token.get('chainId', 'solana')}/token/{token_address})\n"
         f"🗺️ [BubbleMaps (المحافظ)](https://app.bubblemaps.io/{token.get('chainId', 'solana')}/{token_address})"
     )
 
     signal = {
-        "chain": chain, "symbol": symbol, "fdv": fdv_str, "change": f"+{m5_change:.1f}% (5m)", "liquidity": liquidity,
+        "chain": chain, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "url": pair_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -126,7 +118,7 @@ def send_jev_alert(token):
     if len(recent_signals) > 60:
         recent_signals.pop()
 
-    log.info(f"إشارة لحظية مبكرة من Jev [{chain}]: {symbol} بنسبة +{m5_change:.1f}% في أول 5 دقائق")
+    log.info(f"إشارة جديدة فوريّة [{chain}]: {symbol}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -136,29 +128,29 @@ def send_jev_alert(token):
                 "text": message,
                 "parse_mode": "Markdown",
                 "disable_web_page_preview": True
-            }, timeout=10)
+            }, timeout=8)
         except Exception as e:
             log.warning(f"فشل إرسال تنبيه Telegram: {e}")
 
 def run_sniper_loop():
     while True:
         try:
-            tokens = fetch_and_evaluate_tokens()
+            tokens = get_latest_genesis_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if not token_address:
                     continue
                 
-                # منع التكرار لمدة ساعتين
+                # عدم التكرار لمدة 3 ساعات
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=3):
                     continue
                 
-                send_jev_alert(token)
+                send_genesis_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
-                time.sleep(2)
+                time.sleep(1)
         except Exception as e:
-            log.error(f"خطأ في حلقة القرار الفوري: {e}")
+            log.error(f"خطأ في حلقة الرصد اللحظي السريع: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
@@ -171,8 +163,8 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Instant Jev Alpha Trader - لوحة الصيد اللحظي</title>
-<meta http-equiv="refresh" content="10">
+<title>Genesis Instant Sniper - لوحة الصيد اللحظي</title>
+<meta http-equiv="refresh" content="5">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
   h1 { color: #facc15; }
@@ -182,23 +174,21 @@ DASHBOARD_HTML = """
   tr:hover { background: #1a1d24; }
   .ca { color: #38bdf8; font-family: monospace; font-size: 14px; }
   .badge { background: #1e293b; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-  .green { color: #4ade80; font-weight: bold; }
   a { color: #4ade80; text-decoration: none; }
   a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-  <h1>⚡🚀 Instant Jev Breakout Trader (5m Momentum)</h1>
-  <p>يعمل برصد الانطلاقات الفورية الأولى | عدد الصفقات اللحظية المعتمدة: {{ signals|length }}</p>
+  <h1>⚡🔥 Genesis Instant New Pairs Sniper</h1>
+  <p>رصد مباشر وفوري للأزواج الجديدة كل 5 ثوانٍ | إجمالي الصفقات اللحظية: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>التغير اللحظي (5m)</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة الأولية</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
       <td><span class="badge">{{ s.chain }}</span></td>
       <td><b>{{ s.symbol }}</b></td>
       <td style="color: #facc15;">{{ s.fdv }} 🚀</td>
-      <td class="green">{{ s.change }}</td>
       <td>${{ "%.0f"|format(s.liquidity) }}</td>
       <td class="ca">{{ s.address }}</td>
       <td><a href="{{ s.url }}" target="_blank">فحص ↗</a></td>
