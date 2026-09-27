@@ -52,7 +52,7 @@ def jev_decision_engine(token):
             
         return True, "تم اجتياز القرار بنجاح"
     except Exception as e:
-        return False, fخطأ في تقييم القرار: {str(e)}"
+        return False, f"خطأ في تقييم القرار: {str(e)}"
 
 # ==================== جلب ورصد التوكنات ====================
 
