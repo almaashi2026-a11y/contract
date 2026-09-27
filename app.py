@@ -1,5 +1,5 @@
-# genesis_sniper_v5_pro.py
-# بوت صيد الألفا المتقدم - إدارة آلية وسرعة تدوير الصفقة بدون عاطفة
+# genesis_sniper_v7_active.py
+# بوت صيد الألفا - تصفية العملات الميتة والتركيز على العملات النشطة فور ولادتها
 
 import os
 import time
@@ -14,18 +14,18 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 2           # فحص فائق السرعة كل ثانيتين
+SCAN_INTERVAL = 3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("genesis_pro_v5")
+log = logging.getLogger("active_sniper_v7")
 
-alerted_tokens = {}
-active_positions = []       # تتبع الصفقات الحالية لفرض الانضباط والحيادية
+alerted_tokens = set()
+active_positions = []
 
-# ==================== جلب وتصفية الفرص الحية ====================
+# ==================== جلب العملات النشطة والجديدة ====================
 
-def get_pro_tokens():
-    """جلب أحدث الأزواج اللحظية مع فلترة السيولة والزخم المبكر"""
+def get_active_genesis_tokens():
+    """جلب العملات الجديدة التي تمتلك حركة تداول حقيقية وسيولة نشطة"""
     approved_tokens = []
     
     try:
@@ -36,26 +36,37 @@ def get_pro_tokens():
             data = r.json()
             pairs = data.get("pairs", []) or []
             
+            now_ts = time.time() * 1000
+            
             for p in pairs:
+                pair_created = p.get("pairCreatedAt", 0)
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
+                
+                # التحقق من الصفقات والنشاط (لمنع العملات الميتة ذات الـ 0 صفقات)
+                txns = p.get("txns", {}).get("h1", {})
+                h1_buys = int(txns.get("buys", 0))
+                h1_sells = int(txns.get("sells", 0))
+                total_txns = h1_buys + h1_sells
                 
                 base_token = p.get("baseToken", {})
                 symbol = base_token.get("symbol")
                 address = base_token.get("address")
                 
-                # شروط الصيد الحياد والدوران السريع
-                if symbol and address and 300 <= liq <= 400000 and 0 < fdv <= 900000:
+                # شروط دقيقة: عمر الزوج جديد (أقل من ساعتين) + سيولة مقبولة + صفقات نشطة وليست ميتة
+                is_new = (pair_created > 0) and ((now_ts - pair_created) < 7200000)
+                
+                if symbol and address and is_new and liq >= 1000 and fdv > 0 and total_txns > 2:
                     approved_tokens.append(p)
                     
     except Exception as e:
-        log.error(f"خطأ في جلب الفرص: {e}")
+        log.error(f"خطأ في جلب العملات النشطة: {e}")
         
-    return approved_tokens[:15]
+    return approved_tokens[:10]
 
-# ==================== إرسال التنبيهات مع استراتيجية الانضباط ====================
+# ==================== الإرسال الفوري ====================
 
-def send_pro_alert(token):
+def send_active_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
     
@@ -76,67 +87,59 @@ def send_pro_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"🤖⚡ **NEUTRAL BOT SIGNAL ({chain_upper})**\n"
+        f"⚡🚀 **ACTIVE GENESIS TOKEN ({chain_upper})**\n"
         f"🎯 *فلوس الميم في الدوران، مش في الإيمان.*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **التنفيذ والتحليل السريع:**\n"
-        f"📊 [Defined.fi (تحليل)]({defined_url})\n"
-        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})\n"
-        f"⚠️ *قاعدة البوت: لا تعاطف، اخرج عند الهدف أو الخسارة فوراً.*"
+        f"🛡️ **روابط التحليل:**\n"
+        f"📊 [Defined.fi]({defined_url})\n"
+        f"⚡ [شراء OKX DEX]({okx_trade_url})"
     )
 
     position = {
         "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "نشط (قيد التدوير)"
+        "status": "نشط وله تداولات"
     }
     
-    if not any(p["address"] == token_address for p in active_positions):
+    if token_address not in alerted_tokens:
+        alerted_tokens.add(token_address)
         active_positions.insert(0, position)
-        if len(active_positions) > 50:
+        if len(active_positions) > 30:
             active_positions.pop()
 
-    log.info(f"إشارة ذكية [{chain_upper}]: {symbol}")
+        log.info(f"اكتشاف عملة نشطة [{chain_upper}]: {symbol}")
 
-    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-            requests.post(url, json={
-                "chat_id": TELEGRAM_CHAT_ID,
-                "text": message,
-                "parse_mode": "Markdown",
-                "disable_web_page_preview": True
-            }, timeout=6)
-        except Exception as e:
-            log.warning(f"فشل إرسال التيليجرام: {e}")
+        if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+            try:
+                url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+                requests.post(url, json={
+                    "chat_id": TELEGRAM_CHAT_ID,
+                    "text": message,
+                    "parse_mode": "Markdown",
+                    "disable_web_page_preview": True
+                }, timeout=6)
+            except Exception as e:
+                log.warning(f"فشل إرسال التيليجرام: {e}")
 
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_pro_tokens()
+            tokens = get_active_genesis_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
-                if not token_address:
-                    continue
-                
-                last_alert = alerted_tokens.get(token_address)
-                # تقليص فترة الحظر لتשجيع إعادة الدخول إذا تجدد الزخم (بدون عاطفة)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(minutes=30):
-                    continue
-                
-                send_pro_alert(token)
-                alerted_tokens[token_address] = datetime.utcnow()
+                if token_address:
+                    send_active_alert(token)
         except Exception as e:
             log.error(f"خطأ في حلقة الرصد: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم الاحترافية ====================
+# ==================== لوحة التحكم ====================
 
 app = Flask(__name__)
 
@@ -145,7 +148,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Genesis Pro - Neutral Sniper</title>
+<title>Active Genesis Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -162,8 +165,8 @@ DASHBOARD_HTML = """
 </style>
 </head>
 <body>
-  <h1>🤖⚡ Genesis Pro - Neutral Sniper</h1>
-  <p>فلوس الميم في الدوران، مش في الإيمان | إجمالي الفرص المرصودة: {{ positions|length }}</p>
+  <h1>⚡ Active Genesis Sniper (No Dead Coins)</h1>
+  <p>فلوس الميم في الدوران | العملات النشطة حديثاً فقط: {{ positions|length }}</p>
   <table>
     <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for p in positions %}
