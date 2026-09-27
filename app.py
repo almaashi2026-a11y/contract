@@ -1,5 +1,5 @@
 # multi_chain_alpha_sniper.py
-# بوت صيد عقود Alpha والـ Memes الشامل لجميع السلاسل - عالي الجودة
+# بوت صيد عقود Alpha اللحظية - رصد الصعود والزخم الحقيقي بدون هبوط
 
 import os
 import time
@@ -14,25 +14,25 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 20          # فحص ذكي دوري كل 20 ثانية
+SCAN_INTERVAL = 15          # فحص أسرع كل 15 ثانية للرصد اللحظي
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("multi_chain_sniper")
+log = logging.getLogger("alpha_sniper")
 
 alerted_tokens = {}
 recent_signals = []
 
-# السلاسل المدعومة في نظام البحث
 SUPPORTED_CHAINS = ["solana", "ethereum", "base", "arbitrum", "bsc"]
 
-# ==================== جلب وتصفية التوكنات لجميع السلاسل ====================
+# ==================== جلب التوكنات لحظياً عبر Boosts والترند الصاعد ====================
 
-def get_multi_chain_tokens():
-    """جلب أحدث التوكنات والترندات عبر جميع السلاسل وتطبيق فلترة الجودة"""
+def get_live_momentum_tokens():
+    """جلب العملات التي تم إطلاقها حديثاً ولديها زخم صاعد حقيقي فقط"""
     all_valid_pairs = []
     
     for chain in SUPPORTED_CHAINS:
         try:
+            # استخدام نقطة الترند والـ Boosts لأحدث العملات النشطة
             url = f"https://api.dexscreener.com/latest/dex/search?q={chain}"
             r = requests.get(url, timeout=8)
             if r.status_code != 200:
@@ -45,18 +45,23 @@ def get_multi_chain_tokens():
                     liq = float((p.get("liquidity") or {}).get("usd") or 0)
                     fdv = float(p.get("fdv") or 0)
                     
-                    # 🛡️ شروط الجودة والسيولة الحقيقية:
-                    # - سيولة آمنة ومناسبة للتداول
-                    # - قيمة سوقية تتيح فرص نمو صاروخية
-                    if 5000 <= liq <= 500000 and 0 < fdv <= 2000000:
+                    # التحقق من الزخم السعري (لتجنب العملات التي تهبط)
+                    price_change = p.get("priceChange", {})
+                    h1_change = float(price_change.get("h1") or 0) if isinstance(price_change, dict) else 0.0
+                    
+                    # 🛡️ شروط الصيد اللحظي:
+                    # 1. السيولة بين 5,000$ و 300,000$
+                    # 2. القيمة السوقية أقل من 1,500,000$
+                    # 3. التغير السعري في آخر ساعة موجب (في حالة صعود / زخم حي وليس هبوط)
+                    if 5000 <= liq <= 300000 and 0 < fdv <= 1500000 and h1_change > 2.0:
                         all_valid_pairs.append(p)
             time.sleep(0.2)
         except Exception as e:
-            log.warning(f"خطأ في جلب سلسلة {chain}: {e}")
+            log.warning(f"خطأ في رصد سلسلة {chain}: {e}")
             
-    # ترتيب النتائج حسب الحجم والنشاط لإحضار الأفضل أولاً
-    all_valid_pairs.sort(key=lambda x: float(((x.get("volume") or {}).get("h1") or 0)), reverse=True)
-    return all_valid_pairs[:15]
+    # ترتيب حسب أعلى تغير سعري في الساعة الأخيرة لاصطياد الأقوى والأسرع صعوداً
+    all_valid_pairs.sort(key=lambda x: float((x.get("priceChange", {}) or {}).get("h1") or 0), reverse=True)
+    return all_valid_pairs[:10]
 
 # ==================== إرسال تنبيهات النخبة (VIP) ====================
 
@@ -67,6 +72,10 @@ def send_vip_alert(token):
     token_address = token.get("baseToken", {}).get("address", "")
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
+    
+    price_change = token.get("priceChange", {})
+    h1_change = float(price_change.get("h1") or 0) if isinstance(price_change, dict) else 0.0
+    
     pair_url = token.get("url", f"https://dexscreener.com/{token.get('chainId', 'solana')}/{token_address}")
     
     if fdv >= 1000000:
@@ -75,11 +84,12 @@ def send_vip_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"🚨🔥 **MULTI-CHAIN ALPHA SNIPER ({chain}):**\n"
-        f"⚡ High Momentum Opportunity Detected!\n\n"
+        f"🚨🔥 **MOMENTUM BREAKOUT ({chain}):**\n"
+        f"⚡ Strong Upward Momentum Detected!\n\n"
         f"🌐 **السلسلة:** `{chain}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **القيمة السوقية (FDV):** `{fdv_str} 🚀🚀`\n"
+        f"📈 **التغير (1h):** `+{h1_change:.1f}% 🟢`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **عقد التوكن (CA):**\n`{token_address}`\n\n"
         f"🛡️ **روابط الفحص والتنفيذ السريع:**\n"
@@ -89,7 +99,7 @@ def send_vip_alert(token):
     )
 
     signal = {
-        "chain": chain, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
+        "chain": chain, "symbol": symbol, "fdv": fdv_str, "change": f"+{h1_change:.1f}%", "liquidity": liquidity,
         "address": token_address, "url": pair_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -97,7 +107,7 @@ def send_vip_alert(token):
     if len(recent_signals) > 60:
         recent_signals.pop()
 
-    log.info(f"إشارة جديدة [{chain}]: {symbol} بقيمة {fdv_str}")
+    log.info(f"إشارة صعود جديدة [{chain}]: {symbol} بنسبة +{h1_change:.1f}%")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -114,26 +124,26 @@ def send_vip_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_multi_chain_tokens()
+            tokens = get_live_momentum_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if not token_address:
                     continue
                 
-                # عدم تكرار نفس التوكن خلال 3 ساعات
+                # عدم التكرار لمدة ساعتين
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=3):
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
                     continue
                 
                 send_vip_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
                 time.sleep(2)
         except Exception as e:
-            log.error(f"خطأ في حلقة الرصد الشامل: {e}")
+            log.error(f"خطأ في حلقة الرصد اللحظي: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم المرئية الموحدة (Dashboard) ====================
+# ==================== لوحة التحكم المرئية ====================
 
 app = Flask(__name__)
 
@@ -142,7 +152,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Multi-Chain Alpha Sniper - لوحة الصيد الشاملة</title>
+<title>Momentum Alpha Sniper - لوحة الصيد اللحظي</title>
 <meta http-equiv="refresh" content="15">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -153,21 +163,23 @@ DASHBOARD_HTML = """
   tr:hover { background: #1a1d24; }
   .ca { color: #38bdf8; font-family: monospace; font-size: 14px; }
   .badge { background: #1e293b; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+  .green { color: #4ade80; font-weight: bold; }
   a { color: #4ade80; text-decoration: none; }
   a:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
-  <h1>🌐 صقر صيد Alpha الشامل (Multi-Chain VIP Calls)</h1>
-  <p>تحديث تلقائي كل 15 ثانية | إجمالي الصفقات المفلترة النشطة: {{ signals|length }}</p>
+  <h1>🚀 لوحة صيد الزخم اللحظي (Breakout Alpha Calls)</h1>
+  <p>تحديث تلقائي كل 15 ثانية | يتم رصد الصفقات في مسار الصعود فقط: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>التغير (1h)</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
       <td><span class="badge">{{ s.chain }}</span></td>
       <td><b>{{ s.symbol }}</b></td>
       <td style="color: #facc15;">{{ s.fdv }} 🚀</td>
+      <td class="green">{{ s.change }}</td>
       <td>${{ "%.0f"|format(s.liquidity) }}</td>
       <td class="ca">{{ s.address }}</td>
       <td><a href="{{ s.url }}" target="_blank">فحص ↗</a></td>
