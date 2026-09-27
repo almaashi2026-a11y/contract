@@ -1,5 +1,5 @@
-# jev_alpha_trader.py
-# بوت صيد Alpha متعدد السلاسل مع معمارية اتخاذ القرار السريع (Jev-Trader Architecture)
+# jev_alpha_trader_instant.py
+# بوت صيد Alpha متعدد السلاسل مع رصد التغير الفوري اللحظي (5 دقائق الأولى)
 
 import os
 import time
@@ -14,50 +14,50 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 15          # فحص ذكي دوري كل 15 ثانية
+SCAN_INTERVAL = 10          # فحص أسرع كل 10 ثوانٍ لالتقاط البدايات اللحظية
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("jev_sniper")
+log = logging.getLogger("jev_instant_sniper")
 
 alerted_tokens = {}
 recent_signals = []
 
 SUPPORTED_CHAINS = ["solana", "ethereum", "base", "arbitrum", "bsc"]
 
-# ==================== طبقة اتخاذ القرار السريع (Jev Decision Gate) ====================
+# ==================== طبقة اتخاذ القرار الفوري (Instant Jev Decision Gate) ====================
 
 def jev_decision_engine(token):
     """
-    طبقة قرار سريعة وثنائية (نعم/لا) تحاكي هندسة Jev:
-    تتحقق من أن العملة تستحق التصعيد والإرسال بناءً على شروط السيولة والزخم الحقيقي.
+    طبقة قرار سريعة تعتمد على الزخم الفوري (الـ 5 دقائق الأولى) للالتقاط المبكر جداً.
     """
     try:
         liq = float((token.get("liquidity") or {}).get("usd") or 0)
         fdv = float(token.get("fdv") or 0)
         
         price_change = token.get("priceChange", {})
-        h1_change = float(price_change.get("h1") or 0) if isinstance(price_change, dict) else 0.0
+        # الاعتماد على التغير خلال 5 دقائق للرصد اللحظي السريع
+        m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
         
-        # 1. شروط الأمان المبدئي والسيولة
-        if not (3000 <= liq <= 400000):
+        # 1. شروط السيولة الآمنة
+        if not (2000 <= liq <= 400000):
             return False, "سيولة غير مناسبة"
             
-        # 2. القيمة السوقية المقبولة لفرص النمو
+        # 2. القيمة السوقية المقبولة
         if not (0 < fdv <= 2000000):
             return False, "قيمة سوقية تتجاوز الحد المسموح"
             
-        # 3. التأكد من أن الزخم صاعد وليس هابطاً
-        if h1_change <= 1.0:
-            return False, "لا يوجد زخم صاعد كافٍ (أو في مسار هبوط)"
+        # 3. الزخم الفوري في أول 5 دقائق (صعود إيجابي سريع)
+        if m5_change <= 2.0:
+            return False, "لا يوجد زخم صاعد كافٍ في الدقائق الخمس الأولى"
             
-        return True, "تم اجتياز القرار بنجاح"
+        return True, "تم اجتياز القرار الفوري بنجاح"
     except Exception as e:
         return False, f"خطأ في تقييم القرار: {str(e)}"
 
-# ==================== جلب ورصد التوكنات ====================
+# ==================== جلب ورصد التوكنات لحظياً ====================
 
 def fetch_and_evaluate_tokens():
-    """جلب الأزواج وتطبيق قرار Jev الفوري عليها"""
+    """جلب الأزواج وتطبيق قرار Jev الفوري عليها بناءً على الـ 5 دقائق الأولى"""
     approved_tokens = []
     
     for chain in SUPPORTED_CHAINS:
@@ -71,7 +71,6 @@ def fetch_and_evaluate_tokens():
             
             for p in pairs:
                 if p.get("chainId") == chain:
-                    # تمرير التوكن عبر طبقة القرار السريع (Jev Decision Gate)
                     passed, reason = jev_decision_engine(p)
                     if passed:
                         approved_tokens.append(p)
@@ -79,8 +78,8 @@ def fetch_and_evaluate_tokens():
         except Exception as e:
             log.warning(f"خطأ في فحص سلسلة {chain}: {e}")
             
-    # ترتيب حسب الأقوى صعوداً
-    approved_tokens.sort(key=lambda x: float((x.get("priceChange", {}) or {}).get("h1") or 0), reverse=True)
+    # ترتيب حسب أعلى تغير فوري في الـ 5 دقائق الأولى (الأسرع انطلاقاً)
+    approved_tokens.sort(key=lambda x: float((x.get("priceChange", {}) or {}).get("m5") or 0), reverse=True)
     return approved_tokens[:10]
 
 # ==================== إرسال التنبيهات وإدارة الصفقات ====================
@@ -94,7 +93,7 @@ def send_jev_alert(token):
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
     
     price_change = token.get("priceChange", {})
-    h1_change = float(price_change.get("h1") or 0) if isinstance(price_change, dict) else 0.0
+    m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
     
     pair_url = token.get("url", f"https://dexscreener.com/{token.get('chainId', 'solana')}/{token_address}")
     
@@ -104,12 +103,12 @@ def send_jev_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"⚡🧠 **JEV DECISION: ALPHA SIGNAL ({chain})**\n"
-        f"🟢 Decision Gate: PASSED (Approved)\n\n"
+        f"⚡🚀 **INSTANT JEV BREAKOUT ({chain})**\n"
+        f"🟢 Early Momentum Detected (First 5m)\n\n"
         f"🌐 **السلسلة:** `{chain}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **القيمة السوقية (FDV):** `{fdv_str} 🚀`\n"
-        f"📈 **التغير (1h):** `+{h1_change:.1f}%`\n"
+        f"📈 **التغير اللحظي (5m):** `+{m5_change:.1f}% 🔥`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **عقد التوكن (CA):**\n`{token_address}`\n\n"
         f"🛡️ **روابط الفحص والتتبع:**\n"
@@ -119,7 +118,7 @@ def send_jev_alert(token):
     )
 
     signal = {
-        "chain": chain, "symbol": symbol, "fdv": fdv_str, "change": f"+{h1_change:.1f}%", "liquidity": liquidity,
+        "chain": chain, "symbol": symbol, "fdv": fdv_str, "change": f"+{m5_change:.1f}% (5m)", "liquidity": liquidity,
         "address": token_address, "url": pair_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
@@ -127,7 +126,7 @@ def send_jev_alert(token):
     if len(recent_signals) > 60:
         recent_signals.pop()
 
-    log.info(f"إشارة معتمدة من Jev [{chain}]: {symbol} بنسبة +{h1_change:.1f}%")
+    log.info(f"إشارة لحظية مبكرة من Jev [{chain}]: {symbol} بنسبة +{m5_change:.1f}% في أول 5 دقائق")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -150,16 +149,16 @@ def run_sniper_loop():
                 if not token_address:
                     continue
                 
-                # منع التكرار لمدة 3 ساعات
+                # منع التكرار لمدة ساعتين
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=3):
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
                     continue
                 
                 send_jev_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
                 time.sleep(2)
         except Exception as e:
-            log.error(f"خطأ في حلقة القرار والتنفيذ: {e}")
+            log.error(f"خطأ في حلقة القرار الفوري: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
@@ -172,8 +171,8 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Jev Alpha Trader - لوحة اتخاذ القرار الذكي</title>
-<meta http-equiv="refresh" content="15">
+<title>Instant Jev Alpha Trader - لوحة الصيد اللحظي</title>
+<meta http-equiv="refresh" content="10">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
   h1 { color: #facc15; }
@@ -189,10 +188,10 @@ DASHBOARD_HTML = """
 </style>
 </head>
 <body>
-  <h1>⚡🧠 Jev Decision-Driven Alpha Trader</h1>
-  <p>يعمل بنظام تقييم القرار السريع (Jev Architecture) | عدد الصفقات المعتمدة: {{ signals|length }}</p>
+  <h1>⚡🚀 Instant Jev Breakout Trader (5m Momentum)</h1>
+  <p>يعمل برصد الانطلاقات الفورية الأولى | عدد الصفقات اللحظية المعتمدة: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>التغير (1h)</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>التغير اللحظي (5m)</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>الرابط</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
