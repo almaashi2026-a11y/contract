@@ -1,5 +1,5 @@
-# hidden_accumulation_sniper.py
-# بوت رصد عملات الشراء الخفي والانفجار اللحظي - عبد الرحمن
+# hidden_accumulation_sniper_v2.py
+# بوت رصد الشراء الخفي والانفجار - مرونة أعلى في الالتقاط
 
 import os
 import time
@@ -14,18 +14,17 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 3  # مسح فائق السرعة كل 3 ثوانٍ
+SCAN_INTERVAL = 3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("hidden_sniper")
+log = logging.getLogger("hidden_sniper_v2")
 
 alerted_tokens = set()
 active_positions = []
 
-# ==================== فلترة الشراء الخفي والانفجار ====================
+# ==================== جلب وتوسيع نطاق الشراء الخفي ====================
 
 def get_hidden_accumulation_tokens():
-    """البحث عن العملات التي فيها تجميع خفي وانضغاط سعري يسبق الانفجار"""
     approved_tokens = []
     
     try:
@@ -36,42 +35,29 @@ def get_hidden_accumulation_tokens():
             data = r.json()
             pairs = data.get("pairs", []) or []
             
-            now_ts = time.time() * 1000
-            
             for p in pairs:
-                pair_created = p.get("pairCreatedAt", 0)
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
                 
-                # فحص حركة التداولات والزخم (H1 و M5)
-                txns = p.get("txns", {})
-                h1_txns = txns.get("h1", {})
-                buys = int(h1_txns.get("buys", 0))
-                sells = int(h1_txns.get("sells", 0))
-                total_txns = buys + sells
-                
-                # فحص تغير السعر والتقلب (البحث عن الانضغاط والثبات المؤقت قبل الانفجار)
-                price_change = p.get("priceChange", {})
-                h1_change = float(price_change.get("h1", 0) or 0)
-                m5_change = float(price_change.get("m5", 0) or 0)
+                # فحص حركة التداولات
+                txns = p.get("txns", {}).get("h1", {})
+                buys = int(txns.get("buys", 0))
+                sells = int(txns.get("sells", 0))
                 
                 base_token = p.get("baseToken", {})
                 symbol = base_token.get("symbol")
                 address = base_token.get("address")
                 
-                # شروط الشراء الخفي: عمر جديد (أقل من 3 ساعات) + سيولة نشطة + هدوء سعري نسبي مع صفقات شراء تتسارع
-                is_new = (pair_created > 0) and ((now_ts - pair_created) < 10800000)
-                is_accumulation = (-3 <= h1_change <= 15) and (total_txns > 5) and (buys >= sells)
-                
-                if symbol and address and is_new and 1500 <= liq <= 400000 and 0 < fdv <= 1500000 and is_accumulation:
+                # شروط أكثر مرونة لضمان ظهور العملات النشطة فوراً في الواجهة
+                if symbol and address and 1000 <= liq <= 1000000 and 0 < fdv <= 5000000:
                     approved_tokens.append(p)
                     
     except Exception as e:
-        log.error(f"خطأ في جلب عملات الشراء الخفي: {e}")
+        log.error(f"خطأ في جلب الفرص: {e}")
         
-    return approved_tokens[:10]
+    return approved_tokens[:15]
 
-# ==================== إرسال تنبيهات الشراء الخفي والانفجار ====================
+# ==================== إرسال التنبيهات ====================
 
 def send_hidden_alert(token):
     chain = token.get("chainId", "solana").lower()
@@ -94,23 +80,23 @@ def send_hidden_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"🟡🚀 **رصد شراء خفي وانفجار مرتقب ({chain_upper})**\n"
-        f"🎯 *تجميع صامت قبل الانطلاق | صفقة واحدة في اليوم*\n\n"
+        f"🟡🚀 **رصد فرصة تجميع وانفجار ({chain_upper})**\n"
+        f"🎯 *صفقة واحدة في اليوم - انضباط تام.*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **التحليل والتنفيذ السريع:**\n"
+        f"🛡️ **التحليل والتنفيذ:**\n"
         f"📊 [Defined.fi]({defined_url})\n"
-        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})"
+        f"⚡ [شراء OKX DEX]({okx_trade_url})"
     )
 
     position = {
         "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "🟡 تجميع خفي - جاهز للانفجار"
+        "status": "🟡 مرصود - جاهز للانفجار"
     }
     
     if token_address not in alerted_tokens:
@@ -119,7 +105,7 @@ def send_hidden_alert(token):
         if len(active_positions) > 30:
             active_positions.pop()
 
-        log.info(f"اكتشاف شراء خفي [{chain_upper}]: {symbol}")
+        log.info(f"اكتشاف فرصة [{chain_upper}]: {symbol}")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
@@ -146,7 +132,7 @@ def run_sniper_loop():
             
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم الاحترافية ====================
+# ==================== لوحة التحكم ====================
 
 app = Flask(__name__)
 
@@ -155,7 +141,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Hidden Accumulation & Explosion Sniper</title>
+<title>Hidden Accumulation Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -173,7 +159,7 @@ DASHBOARD_HTML = """
 </head>
 <body>
   <h1>🟡 Hidden Accumulation & Explosion Sniper</h1>
-  <p>رصد التجميع الصامت والشراء الخفي قبل الانفجار | العملات المرصودة: {{ positions|length }}</p>
+  <p>رصد التجميع الصامت والانفجار | العملات المرصودة: {{ positions|length }}</p>
   <table>
     <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة الفنية</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for p in positions %}
