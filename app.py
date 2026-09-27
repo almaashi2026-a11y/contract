@@ -1,5 +1,5 @@
-# high_liquidity_whale_sniper.py
-# بوت رصد سيولة الحيتان والمحافظ القوية - سيولة عالية ومرخصة
+# pro_explosion_sniper.py
+# بوت احتراف صيد الانفجار اللحظي والزخم الصامت - عبد الرحمن
 
 import os
 import time
@@ -14,21 +14,21 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 3
+SCAN_INTERVAL = 2  # مسح أسرع لالتقاط الانفجار في لحظته
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("high_liq_sniper")
+log = logging.getLogger("pro_explosion_sniper")
 
 alerted_tokens = set()
 active_positions = []
 
-# ==================== فلترة السيولة القوية والحيتان ====================
+# ==================== فلترة صيد الانفجار الاحترافي ====================
 
-def get_high_liquidity_whale_tokens():
+def get_explosion_tokens():
     approved_tokens = []
     
     try:
-        # جلب العملات النشطة والمدعومة ذات التداول الحقيقي
+        # جلب العملات الأكثر نشاطاً ودعماً عبر الشبكة
         url = "https://api.dexscreener.com/token-boosts/latest/v1"
         r = requests.get(url, timeout=5)
         
@@ -46,6 +46,7 @@ def get_high_liquidity_whale_tokens():
                         if p_list:
                             pairs.extend(p_list)
         
+        # إذا كانت قائمة البوستر غير كافية، نسحب من البحث العام النشط
         if not pairs:
             fallback_r = requests.get("https://api.dexscreener.com/latest/dex/search?q=solana", timeout=4)
             if fallback_r.status_code == 200:
@@ -55,22 +56,34 @@ def get_high_liquidity_whale_tokens():
             liq = float((p.get("liquidity") or {}).get("usd") or 0)
             fdv = float(p.get("fdv") or 0)
             
+            # فحص الزخم السعري اللحظي (M5 و H1) لاصطياد الانفجار في بدايته
+            price_change = p.get("priceChange", {})
+            m5_change = float(price_change.get("m5", 0) or 0)
+            h1_change = float(price_change.get("h1", 0) or 0)
+            
+            # حركة الصفقات والسيطرـة الشرائية
+            txns = p.get("txns", {}).get("h1", {})
+            buys = int(txns.get("buys", 0))
+            sells = int(txns.get("sells", 0))
+            
             base_token = p.get("baseToken", {})
             symbol = base_token.get("symbol")
             address = base_token.get("address")
             
-            # 🛡️ فلترة صارمة جداً: منع السيولة الضعيفة تماماً، واشترط سيولة حقيقية من 20 ألف إلى 2 مليون دولار
-            if symbol and address and 20000 <= liq <= 2000000 and 50000 <= fdv <= 10000000:
+            # شروط الانفجار الاحترافي: سيولة قوية ومضمونة (30 ألف إلى 2 مليون) + تسارع سعري إيجابي في آخر 5 دقائق ودعم شرائي
+            is_exploding = (m5_change >= 2.5) and (buys >= sells)
+            
+            if symbol and address and 30000 <= liq <= 2000000 and 50000 <= fdv <= 15000000 and is_exploding:
                 approved_tokens.append(p)
                 
     except Exception as e:
-        log.error(f"خطأ في جلب السيولة العالية: {e}")
+        log.error(f"خطأ في رصد الانفجار: {e}")
         
     return approved_tokens[:15]
 
-# ==================== إرسال التنبيهات ====================
+# ==================== إرسال تنبيه الانفجار ====================
 
-def send_high_liq_alert(token):
+def send_explosion_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
     
@@ -82,6 +95,10 @@ def send_high_liq_alert(token):
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
     
+    price_change = token.get("priceChange", {})
+    m5 = float(price_change.get("m5", 0) or 0)
+    h1 = float(price_change.get("h1", 0) or 0)
+    
     defined_url = f"https://www.defined.fi/{chain}/{token_address}"
     okx_trade_url = f"https://www.okx.com/web3/dex-market?chainId={chain}&tokenAddress={token_address}"
     bubblemaps_url = f"https://app.bubblemaps.io/sol/token/{token_address}"
@@ -92,14 +109,15 @@ def send_high_liq_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"💎🚀 **رصد سيولة عالية وحيتان قوية ({chain_upper})**\n"
-        f"🎯 *سيولة حقيقية مؤكدة | صفقة واحدة في اليوم*\n\n"
+        f"🚨🔥 **تم رصد انفجار لحظي واشتعال الزخم ({chain_upper})**\n"
+        f"🎯 *صفقة واحدة في اليوم - دخول احترافي مع الحيتان*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
+        f"📈 **تغير M5:** `+{m5:.1f}%` | **H1:** `+{h1:.1f}%`\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
         f"💧 **السيولة الحقيقية:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **الفحص والتنفيذ:**\n"
+        f"🛡️ **فحص الحيتان والتنفيذ السريع:**\n"
         f"🫧 [فحص المحافظ BubbleMaps]({bubblemaps_url})\n"
         f"📊 [Defined.fi]({defined_url})\n"
         f"⚡ [شراء OKX DEX]({okx_trade_url})"
@@ -107,10 +125,10 @@ def send_high_liq_alert(token):
 
     position = {
         "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
-        "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
-        "bubblemaps_url": bubblemaps_url,
+        "m5": f"+{m5:.1f}%", "address": token_address, 
+        "defined_url": defined_url, "okx_url": okx_trade_url, "bubblemaps_url": bubblemaps_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "💎 سيولة عالية ومضمونة"
+        "status": "🔥 انفجار وزخم مشتعل"
     }
     
     if token_address not in alerted_tokens:
@@ -119,7 +137,7 @@ def send_high_liq_alert(token):
         if len(active_positions) > 30:
             active_positions.pop()
 
-        log.info(f"اكتشاف سيولة عالية [{chain_upper}]: {symbol} - السيولة: ${liquidity:,.0f}")
+        log.info(f"اكتشاف انفجار [{chain_upper}]: {symbol} - تغير M5: +{m5}%")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
@@ -136,11 +154,11 @@ def send_high_liq_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_high_liquidity_whale_tokens()
+            tokens = get_explosion_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if token_address:
-                    send_high_liq_alert(token)
+                    send_explosion_alert(token)
         except Exception as e:
             log.error(f"خطأ في حلقة الرصد: {e}")
             
@@ -155,7 +173,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>High Liquidity Whale Sniper</title>
+<title>Pro Explosion Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -169,20 +187,22 @@ DASHBOARD_HTML = """
   .btn-okx { background: #2563eb; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
   .btn-def { background: #059669; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
   .btn-bubble { background: #9333ea; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
-  .status { color: #38bdf8; font-weight: bold; }
+  .status { color: #ef4444; font-weight: bold; }
+  .pump { color: #22c55e; font-weight: bold; }
 </style>
 </head>
 <body>
-  <h1>💎 High Liquidity & Whale Sniper</h1>
-  <p>رصد العملات ذات السيولة العالية والحيتان المؤكدة (الحد الأدنى للسيولة 20 ألف دولار) | العملات المرصودة: {{ positions|length }}</p>
+  <h1>🔥 Pro Explosion & Whale Sniper</h1>
+  <p>رصد الانفجارات السعرية الحية والسيولة القوية (الحد الأدنى 30 ألف دولار) | العملات المرصودة: {{ positions|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>BubbleMaps</th><th>Defined</th><th>OKX DEX</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>شمعة 5m</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>BubbleMaps</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for p in positions %}
     <tr>
       <td>{{ p.time }}</td>
       <td><span class="badge">{{ p.chain }}</span></td>
       <td><b>{{ p.symbol }}</b></td>
-      <td style="color: #facc15;">{{ p.fdv }} 🚀</td>
+      <td class="pump">{{ p.m5 }} 🚀</td>
+      <td style="color: #facc15;">{{ p.fdv }}</td>
       <td style="color: #38bdf8; font-weight: bold;">${{ "%.0f"|format(p.liquidity) }}</td>
       <td class="status">{{ p.status }}</td>
       <td class="ca">{{ p.address }}</td>
