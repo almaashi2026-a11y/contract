@@ -1,5 +1,5 @@
-# whale_accumulation_sniper.py
-# بوت رصد المحافظ القوية والشراء المؤسسي قبل الانفجار - عبد الرحمن
+# high_liquidity_whale_sniper.py
+# بوت رصد سيولة الحيتان والمحافظ القوية - سيولة عالية ومرخصة
 
 import os
 import time
@@ -17,31 +17,28 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 SCAN_INTERVAL = 3
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("whale_sniper")
+log = logging.getLogger("high_liq_sniper")
 
 alerted_tokens = set()
 active_positions = []
 
-# ==================== رصد تدفق المحافظ القوية ====================
+# ==================== فلترة السيولة القوية والحيتان ====================
 
-def get_whale_accumulation_tokens():
-    """رصد العملات التي تشهد ضخ سيولة من محافظ قوية وتفاعل حوتي"""
+def get_high_liquidity_whale_tokens():
     approved_tokens = []
     
     try:
-        # استخدام نقطة نهاية الـ Boosts والترندات الحوتية لجلب العملات التي تحصل على اهتمام المحافظ الكبيرة
+        # جلب العملات النشطة والمدعومة ذات التداول الحقيقي
         url = "https://api.dexscreener.com/token-boosts/latest/v1"
         r = requests.get(url, timeout=5)
         
         pairs = []
         if r.status_code == 200:
             boost_data = r.json()
-            # استخراج العناوين والروابط من البوستر المهتم به الحيتان
             for item in boost_data:
                 token_addr = item.get("tokenAddress")
                 chain = item.get("chainId", "solana")
                 if token_addr:
-                    # جلب تفاصيل الزوج المباشرة لهذا التوكن المرصود من الحيتان
                     pair_r = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{token_addr}", timeout=3)
                     if pair_r.status_code == 200:
                         pair_json = pair_r.json()
@@ -49,7 +46,6 @@ def get_whale_accumulation_tokens():
                         if p_list:
                             pairs.extend(p_list)
         
-        # إذا كانت قائمة البوستر فارغة، نتحول للبحث الاحتياطي النشط جداً
         if not pairs:
             fallback_r = requests.get("https://api.dexscreener.com/latest/dex/search?q=solana", timeout=4)
             if fallback_r.status_code == 200:
@@ -59,22 +55,22 @@ def get_whale_accumulation_tokens():
             liq = float((p.get("liquidity") or {}).get("usd") or 0)
             fdv = float(p.get("fdv") or 0)
             
-            # فحص تدفق الصفقات الكبيرة والنشاط الحوتي (حجم التداول والسيولة)
             base_token = p.get("baseToken", {})
             symbol = base_token.get("symbol")
             address = base_token.get("address")
             
-            if symbol and address and 2000 <= liq <= 2000000 and 0 < fdv <= 10000000:
+            # 🛡️ فلترة صارمة جداً: منع السيولة الضعيفة تماماً، واشترط سيولة حقيقية من 20 ألف إلى 2 مليون دولار
+            if symbol and address and 20000 <= liq <= 2000000 and 50000 <= fdv <= 10000000:
                 approved_tokens.append(p)
                 
     except Exception as e:
-        log.error(f"خطأ في رصد محافظ الحيتان: {e}()")
+        log.error(f"خطأ في جلب السيولة العالية: {e}")
         
     return approved_tokens[:15]
 
-# ==================== إرسال تنبيه الحيتان ====================
+# ==================== إرسال التنبيهات ====================
 
-def send_whale_alert(token):
+def send_high_liq_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
     
@@ -88,7 +84,7 @@ def send_whale_alert(token):
     
     defined_url = f"https://www.defined.fi/{chain}/{token_address}"
     okx_trade_url = f"https://www.okx.com/web3/dex-market?chainId={chain}&tokenAddress={token_address}"
-    bubblemaps_url = f"https://app.bubblemaps.io/sol/token/{token_address}" # لفحص توزيع المحافظ والحيتان
+    bubblemaps_url = f"https://app.bubblemaps.io/sol/token/{token_address}"
     
     if fdv >= 1000000:
         fdv_str = f"{fdv / 1000000:.1f}M"
@@ -96,14 +92,14 @@ def send_whale_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"🐋🔥 **رصد دخول محافظ قوية وحيتان ({chain_upper})**\n"
-        f"🎯 *الشراء المؤسسي الصامت قبل الانفجار | صفقة واحدة في اليوم*\n\n"
+        f"💎🚀 **رصد سيولة عالية وحيتان قوية ({chain_upper})**\n"
+        f"🎯 *سيولة حقيقية مؤكدة | صفقة واحدة في اليوم*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
-        f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
+        f"💧 **السيولة الحقيقية:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **فحص الحيتان والتنفيذ:**\n"
+        f"🛡️ **الفحص والتنفيذ:**\n"
         f"🫧 [فحص المحافظ BubbleMaps]({bubblemaps_url})\n"
         f"📊 [Defined.fi]({defined_url})\n"
         f"⚡ [شراء OKX DEX]({okx_trade_url})"
@@ -114,7 +110,7 @@ def send_whale_alert(token):
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
         "bubblemaps_url": bubblemaps_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "🐋 رصد حيتان ومحافظ قوية"
+        "status": "💎 سيولة عالية ومضمونة"
     }
     
     if token_address not in alerted_tokens:
@@ -123,7 +119,7 @@ def send_whale_alert(token):
         if len(active_positions) > 30:
             active_positions.pop()
 
-        log.info(f"اكتشاف حيتان [{chain_upper}]: {symbol}")
+        log.info(f"اكتشاف سيولة عالية [{chain_upper}]: {symbol} - السيولة: ${liquidity:,.0f}")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
@@ -140,11 +136,11 @@ def send_whale_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_whale_accumulation_tokens()
+            tokens = get_high_liquidity_whale_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if token_address:
-                    send_whale_alert(token)
+                    send_high_liq_alert(token)
         except Exception as e:
             log.error(f"خطأ في حلقة الرصد: {e}")
             
@@ -159,7 +155,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Whale Accumulation Sniper</title>
+<title>High Liquidity Whale Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -177,17 +173,17 @@ DASHBOARD_HTML = """
 </style>
 </head>
 <body>
-  <h1>🐋 Whale & Smart Money Accumulation Sniper</h1>
-  <p>رصد المحافظ القوية وتدفقات الحيتان قبل الانفجار | العملات المرصودة: {{ positions|length }}</p>
+  <h1>💎 High Liquidity & Whale Sniper</h1>
+  <p>رصد العملات ذات السيولة العالية والحيتان المؤكدة (الحد الأدنى للسيولة 20 ألف دولار) | العملات المرصودة: {{ positions|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة الحوتية</th><th>العقد (CA)</th><th>BubbleMaps</th><th>Defined</th><th>OKX DEX</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>BubbleMaps</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for p in positions %}
     <tr>
       <td>{{ p.time }}</td>
       <td><span class="badge">{{ p.chain }}</span></td>
       <td><b>{{ p.symbol }}</b></td>
       <td style="color: #facc15;">{{ p.fdv }} 🚀</td>
-      <td>${{ "%.0f"|format(p.liquidity) }}</td>
+      <td style="color: #38bdf8; font-weight: bold;">${{ "%.0f"|format(p.liquidity) }}</td>
       <td class="status">{{ p.status }}</td>
       <td class="ca">{{ p.address }}</td>
       <td><a href="{{ p.bubblemaps_url }}" target="_blank" class="btn-bubble">توزيع الحيتان 🫧</a></td>
