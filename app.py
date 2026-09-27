@@ -1,5 +1,5 @@
-# fast_genesis_sniper_v4.py
-# بوت صيد الألفا اللحظي - تصحيح عرض رموز العملات بدقة
+# genesis_sniper_v5_pro.py
+# بوت صيد الألفا المتقدم - إدارة آلية وسرعة تدوير الصفقة بدون عاطفة
 
 import os
 import time
@@ -9,29 +9,28 @@ import requests
 from datetime import datetime, timedelta
 from flask import Flask, jsonify, render_template_string
 
-# ==================== الإعدادات ====================
+# ==================== الإعدادات الأساسية ====================
 
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 3           # فحص سريع كل 3 ثوانٍ
+SCAN_INTERVAL = 2           # فحص فائق السرعة كل ثانيتين
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("fast_sniper_v4")
+log = logging.getLogger("genesis_pro_v5")
 
 alerted_tokens = {}
-recent_signals = []
+active_positions = []       # تتبع الصفقات الحالية لفرض الانضباط والحيادية
 
-# ==================== الجلب السريع وتصحيح الرموز ====================
+# ==================== جلب وتصفية الفرص الحية ====================
 
-def get_fast_tokens():
-    """جلب أحدث التوكنات مع استخراج الرمز الحقيقي والشبكة بدقة"""
+def get_pro_tokens():
+    """جلب أحدث الأزواج اللحظية مع فلترة السيولة والزخم المبكر"""
     approved_tokens = []
     
     try:
-        # جلب أحدث الأزواج النشطة عبر بحث عام شامل
-        url = "https://api.dexscreener.com/latest/dex/search?q=usd"
-        r = requests.get(url, timeout=5)
+        url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+        r = requests.get(url, timeout=4)
         
         if r.status_code == 200:
             data = r.json()
@@ -41,22 +40,22 @@ def get_fast_tokens():
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
                 
-                # التأكد من وجود رمز العملة الأساسية وعنوان العقد
                 base_token = p.get("baseToken", {})
                 symbol = base_token.get("symbol")
                 address = base_token.get("address")
                 
-                if symbol and address and liq > 200 and fdv > 0:
+                # شروط الصيد الحياد والدوران السريع
+                if symbol and address and 300 <= liq <= 400000 and 0 < fdv <= 900000:
                     approved_tokens.append(p)
                     
     except Exception as e:
-        log.error(f"خطأ في جلب التوكنات: {e}")
+        log.error(f"خطأ في جلب الفرص: {e}")
         
     return approved_tokens[:15]
 
-# ==================== الإرسال الفوري ====================
+# ==================== إرسال التنبيهات مع استراتيجية الانضباط ====================
 
-def send_genesis_alert(token):
+def send_pro_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
     
@@ -77,29 +76,32 @@ def send_genesis_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"⚡🚀 **NEW GENESIS SIGNAL ({chain_upper})**\n\n"
+        f"🤖⚡ **NEUTRAL BOT SIGNAL ({chain_upper})**\n"
+        f"🎯 *فلوس الميم في الدوران، مش في الإيمان.*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **روابط التحليل والتنفيذ:**\n"
-        f"📊 [Defined.fi]({defined_url})\n"
-        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})"
+        f"🛡️ **التنفيذ والتحليل السريع:**\n"
+        f"📊 [Defined.fi (تحليل)]({defined_url})\n"
+        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})\n"
+        f"⚠️ *قاعدة البوت: لا تعاطف، اخرج عند الهدف أو الخسارة فوراً.*"
     )
 
-    signal = {
+    position = {
         "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
-        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "status": "نشط (قيد التدوير)"
     }
     
-    if not any(s["address"] == token_address for s in recent_signals):
-        recent_signals.insert(0, signal)
-        if len(recent_signals) > 50:
-            recent_signals.pop()
+    if not any(p["address"] == token_address for p in active_positions):
+        active_positions.insert(0, position)
+        if len(active_positions) > 50:
+            active_positions.pop()
 
-    log.info(f"إشارة جديدة [{chain_upper}]: {symbol}")
+    log.info(f"إشارة ذكية [{chain_upper}]: {symbol}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -116,24 +118,25 @@ def send_genesis_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_fast_tokens()
+            tokens = get_pro_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if not token_address:
                     continue
                 
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=1):
+                # تقليص فترة الحظر لتשجيع إعادة الدخول إذا تجدد الزخم (بدون عاطفة)
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(minutes=30):
                     continue
                 
-                send_genesis_alert(token)
+                send_pro_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
         except Exception as e:
-            log.error(f"خطأ في الحلقة: {e}")
+            log.error(f"خطأ في حلقة الرصد: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم ====================
+# ==================== لوحة التحكم الاحترافية ====================
 
 app = Flask(__name__)
 
@@ -142,7 +145,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Fast Genesis Sniper</title>
+<title>Genesis Pro - Neutral Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -155,23 +158,25 @@ DASHBOARD_HTML = """
   .badge { background: #1e293b; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
   .btn-okx { background: #2563eb; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
   .btn-def { background: #059669; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
+  .status { color: #4ade80; font-weight: bold; }
 </style>
 </head>
 <body>
-  <h1>⚡ Fast Genesis Sniper (Live)</h1>
-  <p>الرصد المباشر للتوكنات | إجمالي العملات المعروضة: {{ signals|length }}</p>
+  <h1>🤖⚡ Genesis Pro - Neutral Sniper</h1>
+  <p>فلوس الميم في الدوران، مش في الإيمان | إجمالي الفرص المرصودة: {{ positions|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
-    {% for s in signals %}
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
+    {% for p in positions %}
     <tr>
-      <td>{{ s.time }}</td>
-      <td><span class="badge">{{ s.chain }}</span></td>
-      <td><b>{{ s.symbol }}</b></td>
-      <td style="color: #facc15;">{{ s.fdv }} 🚀</td>
-      <td>${{ "%.0f"|format(s.liquidity) }}</td>
-      <td class="ca">{{ s.address }}</td>
-      <td><a href="{{ s.defined_url }}" target="_blank" class="btn-def">Defined ↗</a></td>
-      <td><a href="{{ s.okx_url }}" target="_blank" class="btn-okx">شراء OKX ⚡</a></td>
+      <td>{{ p.time }}</td>
+      <td><span class="badge">{{ p.chain }}</span></td>
+      <td><b>{{ p.symbol }}</b></td>
+      <td style="color: #facc15;">{{ p.fdv }} 🚀</td>
+      <td>${{ "%.0f"|format(p.liquidity) }}</td>
+      <td class="status">{{ p.status }}</td>
+      <td class="ca">{{ p.address }}</td>
+      <td><a href="{{ p.defined_url }}" target="_blank" class="btn-def">Defined ↗</a></td>
+      <td><a href="{{ p.okx_url }}" target="_blank" class="btn-okx">شراء OKX ⚡</a></td>
     </tr>
     {% endfor %}
   </table>
@@ -181,11 +186,11 @@ DASHBOARD_HTML = """
 
 @app.route("/")
 def dashboard():
-    return render_template_string(DASHBOARD_HTML, signals=recent_signals)
+    return render_template_string(DASHBOARD_HTML, positions=active_positions)
 
 @app.route("/api/signals")
 def api_signals():
-    return jsonify(recent_signals)
+    return jsonify(active_positions)
 
 @app.route("/health")
 def health():
