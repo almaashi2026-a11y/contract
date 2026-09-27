@@ -1,5 +1,5 @@
-# genesis_sniper_v7_active.py
-# بوت صيد الألفا - تصفية العملات الميتة والتركيز على العملات النشطة فور ولادتها
+# hidden_accumulation_sniper.py
+# بوت رصد عملات الشراء الخفي والانفجار اللحظي - عبد الرحمن
 
 import os
 import time
@@ -14,23 +14,23 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 3
+SCAN_INTERVAL = 3  # مسح فائق السرعة كل 3 ثوانٍ
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("active_sniper_v7")
+log = logging.getLogger("hidden_sniper")
 
 alerted_tokens = set()
 active_positions = []
 
-# ==================== جلب العملات النشطة والجديدة ====================
+# ==================== فلترة الشراء الخفي والانفجار ====================
 
-def get_active_genesis_tokens():
-    """جلب العملات الجديدة التي تمتلك حركة تداول حقيقية وسيولة نشطة"""
+def get_hidden_accumulation_tokens():
+    """البحث عن العملات التي فيها تجميع خفي وانضغاط سعري يسبق الانفجار"""
     approved_tokens = []
     
     try:
         url = "https://api.dexscreener.com/latest/dex/search?q=solana"
-        r = requests.get(url, timeout=4)
+        r = requests.get(url, timeout=5)
         
         if r.status_code == 200:
             data = r.json()
@@ -43,30 +43,37 @@ def get_active_genesis_tokens():
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
                 
-                # التحقق من الصفقات والنشاط (لمنع العملات الميتة ذات الـ 0 صفقات)
-                txns = p.get("txns", {}).get("h1", {})
-                h1_buys = int(txns.get("buys", 0))
-                h1_sells = int(txns.get("sells", 0))
-                total_txns = h1_buys + h1_sells
+                # فحص حركة التداولات والزخم (H1 و M5)
+                txns = p.get("txns", {})
+                h1_txns = txns.get("h1", {})
+                buys = int(h1_txns.get("buys", 0))
+                sells = int(h1_txns.get("sells", 0))
+                total_txns = buys + sells
+                
+                # فحص تغير السعر والتقلب (البحث عن الانضغاط والثبات المؤقت قبل الانفجار)
+                price_change = p.get("priceChange", {})
+                h1_change = float(price_change.get("h1", 0) or 0)
+                m5_change = float(price_change.get("m5", 0) or 0)
                 
                 base_token = p.get("baseToken", {})
                 symbol = base_token.get("symbol")
                 address = base_token.get("address")
                 
-                # شروط دقيقة: عمر الزوج جديد (أقل من ساعتين) + سيولة مقبولة + صفقات نشطة وليست ميتة
-                is_new = (pair_created > 0) and ((now_ts - pair_created) < 7200000)
+                # شروط الشراء الخفي: عمر جديد (أقل من 3 ساعات) + سيولة نشطة + هدوء سعري نسبي مع صفقات شراء تتسارع
+                is_new = (pair_created > 0) and ((now_ts - pair_created) < 10800000)
+                is_accumulation = (-3 <= h1_change <= 15) and (total_txns > 5) and (buys >= sells)
                 
-                if symbol and address and is_new and liq >= 1000 and fdv > 0 and total_txns > 2:
+                if symbol and address and is_new and 1500 <= liq <= 400000 and 0 < fdv <= 1500000 and is_accumulation:
                     approved_tokens.append(p)
                     
     except Exception as e:
-        log.error(f"خطأ في جلب العملات النشطة: {e}")
+        log.error(f"خطأ في جلب عملات الشراء الخفي: {e}")
         
     return approved_tokens[:10]
 
-# ==================== الإرسال الفوري ====================
+# ==================== إرسال تنبيهات الشراء الخفي والانفجار ====================
 
-def send_active_alert(token):
+def send_hidden_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
     
@@ -87,23 +94,23 @@ def send_active_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"⚡🚀 **ACTIVE GENESIS TOKEN ({chain_upper})**\n"
-        f"🎯 *فلوس الميم في الدوران، مش في الإيمان.*\n\n"
+        f"🟡🚀 **رصد شراء خفي وانفجار مرتقب ({chain_upper})**\n"
+        f"🎯 *تجميع صامت قبل الانطلاق | صفقة واحدة في اليوم*\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
         f"🚀 **FDV:** `{fdv_str}`\n"
         f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **روابط التحليل:**\n"
+        f"🛡️ **التحليل والتنفيذ السريع:**\n"
         f"📊 [Defined.fi]({defined_url})\n"
-        f"⚡ [شراء OKX DEX]({okx_trade_url})"
+        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})"
     )
 
     position = {
         "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
-        "status": "نشط وله تداولات"
+        "status": "🟡 تجميع خفي - جاهز للانفجار"
     }
     
     if token_address not in alerted_tokens:
@@ -112,7 +119,7 @@ def send_active_alert(token):
         if len(active_positions) > 30:
             active_positions.pop()
 
-        log.info(f"اكتشاف عملة نشطة [{chain_upper}]: {symbol}")
+        log.info(f"اكتشاف شراء خفي [{chain_upper}]: {symbol}")
 
         if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
             try:
@@ -129,17 +136,17 @@ def send_active_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_active_genesis_tokens()
+            tokens = get_hidden_accumulation_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if token_address:
-                    send_active_alert(token)
+                    send_hidden_alert(token)
         except Exception as e:
             log.error(f"خطأ في حلقة الرصد: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
-# ==================== لوحة التحكم ====================
+# ==================== لوحة التحكم الاحترافية ====================
 
 app = Flask(__name__)
 
@@ -148,7 +155,7 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Active Genesis Sniper</title>
+<title>Hidden Accumulation & Explosion Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
@@ -161,14 +168,14 @@ DASHBOARD_HTML = """
   .badge { background: #1e293b; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
   .btn-okx { background: #2563eb; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
   .btn-def { background: #059669; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
-  .status { color: #4ade80; font-weight: bold; }
+  .status { color: #facc15; font-weight: bold; }
 </style>
 </head>
 <body>
-  <h1>⚡ Active Genesis Sniper (No Dead Coins)</h1>
-  <p>فلوس الميم في الدوران | العملات النشطة حديثاً فقط: {{ positions|length }}</p>
+  <h1>🟡 Hidden Accumulation & Explosion Sniper</h1>
+  <p>رصد التجميع الصامت والشراء الخفي قبل الانفجار | العملات المرصودة: {{ positions|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>الحالة الفنية</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for p in positions %}
     <tr>
       <td>{{ p.time }}</td>
