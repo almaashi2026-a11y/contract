@@ -1,5 +1,5 @@
-# fast_genesis_sniper_v3.py
-# بوت صيد الألفا اللحظي - جلب وعرض سريع ومباشر بدون قيود معقدة
+# fast_genesis_sniper_v4.py
+# بوت صيد الألفا اللحظي - تصحيح عرض رموز العملات بدقة
 
 import os
 import time
@@ -17,20 +17,20 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 SCAN_INTERVAL = 3           # فحص سريع كل 3 ثوانٍ
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("fast_sniper_v3")
+log = logging.getLogger("fast_sniper_v4")
 
 alerted_tokens = {}
 recent_signals = []
 
-# ==================== الجلب السريع والمباشر ====================
+# ==================== الجلب السريع وتصحيح الرموز ====================
 
 def get_fast_tokens():
-    """جلب أحدث التوكنات مباشرة وعرضها فوراً"""
+    """جلب أحدث التوكنات مع استخراج الرمز الحقيقي والشبكة بدقة"""
     approved_tokens = []
     
     try:
-        # جلب أحدث الأزواج النشطة
-        url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+        # جلب أحدث الأزواج النشطة عبر بحث عام شامل
+        url = "https://api.dexscreener.com/latest/dex/search?q=usd"
         r = requests.get(url, timeout=5)
         
         if r.status_code == 200:
@@ -41,8 +41,12 @@ def get_fast_tokens():
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
                 
-                # شروط مرنة وسريعة لضمان ظهور النتائج فوراً في اللوحة
-                if liq > 200 and fdv > 0:
+                # التأكد من وجود رمز العملة الأساسية وعنوان العقد
+                base_token = p.get("baseToken", {})
+                symbol = base_token.get("symbol")
+                address = base_token.get("address")
+                
+                if symbol and address and liq > 200 and fdv > 0:
                     approved_tokens.append(p)
                     
     except Exception as e:
@@ -55,9 +59,12 @@ def get_fast_tokens():
 def send_genesis_alert(token):
     chain = token.get("chainId", "solana").lower()
     chain_upper = chain.upper()
-    symbol = token.get("baseToken", {}).get("symbol", "UNKNOWN")
-    name = token.get("baseToken", {}).get("name", "Token")
-    token_address = token.get("baseToken", {}).get("address", "")
+    
+    base_token = token.get("baseToken", {})
+    symbol = base_token.get("symbol", "UNKNOWN")
+    name = base_token.get("name", "Token")
+    token_address = base_token.get("address", "")
+    
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
     
@@ -87,7 +94,6 @@ def send_genesis_alert(token):
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
     
-    # عدم تكرار نفس التوكن في القائمة المؤقتة
     if not any(s["address"] == token_address for s in recent_signals):
         recent_signals.insert(0, signal)
         if len(recent_signals) > 50:
