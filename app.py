@@ -1,5 +1,5 @@
 # genesis_defined_okx_sniper.py
-# بوت صيد الألفا اللحظي - مدعوم بـ Defined.fi وتناغم التنفيذ المباشر عبر OKX
+# بوت صيد الألفا اللحظي - مع روابط شراء OKX DEX المباشرة للعقد
 
 import os
 import time
@@ -29,7 +29,6 @@ def get_latest_genesis_tokens():
     approved_tokens = []
     
     try:
-        # جلب البيانات من المصدر اللحظي
         r = requests.get("https://api.dexscreener.com/token-profiles/latest/v1", timeout=6)
         
         if r.status_code == 200:
@@ -67,7 +66,7 @@ def get_latest_genesis_tokens():
         
     return approved_tokens[:10]
 
-# ==================== إرسال التنبيهات مع Defined و OKX ====================
+# ==================== إرسال التنبيهات مع Defined و OKX المباشر ====================
 
 def send_genesis_alert(token):
     chain = token.get("chainId", "solana").lower()
@@ -78,11 +77,12 @@ def send_genesis_alert(token):
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
     
-    # 🔗 روابط Defined.fi بدلاً من DexScreener
+    # 📊 روابط Defined.fi للتحليل
     defined_url = f"https://www.defined.fi/{chain}/{token_address}"
     
-    # 🚀 روابط التداول المباشر عبر OKX Web3 DEX
-    okx_trade_url = f"https://www.okx.com/web3/dex"
+    # 🚀 رابط الشراء والتداول المباشر في OKX Web3 DEX (مربوط بالعقد والسلسلة بدقة)
+    # ملاحظة: OKX Web3 DEX يدعم مسار التداول المباشر بالصيغة التالية عبر منصتهم
+    okx_trade_url = f"https://www.okx.com/web3/dex-market?chainId={chain}&tokenAddress={token_address}"
     
     if fdv >= 1000000:
         fdv_str = f"{fdv / 1000000:.1f}M"
@@ -113,7 +113,7 @@ def send_genesis_alert(token):
     if len(recent_signals) > 60:
         recent_signals.pop()
 
-    log.info(f"إشارة جديدة [{chain_upper}]: {symbol} - Defined & OKX")
+    log.info(f"إشارة جديدة [{chain_upper}]: {symbol} - Defined & OKX Direct")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -175,9 +175,9 @@ DASHBOARD_HTML = """
 </head>
 <body>
   <h1>⚡ Defined.fi & OKX DEX Genesis Sniper</h1>
-  <p>رصد فوري مع روابط تحليل Defined وتنفيذ الشراء عبر OKX | إجمالي الصفقات: {{ signals|length }}</p>
+  <p>رصد فوري مع روابط تحليل Defined وتنفيذ الشراء المباشر عبر OKX | إجمالي الصفقات: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>التحليل (Defined)</th><th>التنفيذ (OKX)</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>القيمة السوقية</th><th>السيولة</th><th>عقد التوكن (CA)</th><th>التحليل (Defined)</th><th>الشراء المباشر (OKX)</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
@@ -187,7 +187,7 @@ DASHBOARD_HTML = """
       <td>${{ "%.0f"|format(s.liquidity) }}</td>
       <td class="ca">{{ s.address }}</td>
       <td><a href="{{ s.defined_url }}" target="_blank" class="btn-def">Defined ↗</a></td>
-      <td><a href="{{ s.okx_url }}" target="_blank" class="btn-okx">OKX DEX ⚡</a></td>
+      <td><a href="{{ s.okx_url }}" target="_blank" class="btn-okx">شراء OKX ⚡</a></td>
     </tr>
     {% endfor %}
   </table>
