@@ -1,5 +1,5 @@
-# hyper_fast_genesis_sniper_v2.py
-# بوت صيد الألفا فائق السرعة - رصد لحظي عند الولادة الأولى للتوكن
+# fast_genesis_sniper_v3.py
+# بوت صيد الألفا اللحظي - جلب وعرض سريع ومباشر بدون قيود معقدة
 
 import os
 import time
@@ -14,23 +14,24 @@ from flask import Flask, jsonify, render_template_string
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
-SCAN_INTERVAL = 2           # فحص كل ثانيتين لرصد التوكنات فور ظهورها
+SCAN_INTERVAL = 3           # فحص سريع كل 3 ثوانٍ
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
-log = logging.getLogger("hyper_sniper_v2")
+log = logging.getLogger("fast_sniper_v3")
 
 alerted_tokens = {}
 recent_signals = []
 
-# ==================== الجلب فائق السرعة للولادة الحقيقية ====================
+# ==================== الجلب السريع والمباشر ====================
 
-def get_hyper_fast_tokens():
-    """جلب أحدث التوكنات فور إنشائها وتصفيتها للزخم المبكر جداً"""
+def get_fast_tokens():
+    """جلب أحدث التوكنات مباشرة وعرضها فوراً"""
     approved_tokens = []
     
     try:
+        # جلب أحدث الأزواج النشطة
         url = "https://api.dexscreener.com/latest/dex/search?q=solana"
-        r = requests.get(url, timeout=4)
+        r = requests.get(url, timeout=5)
         
         if r.status_code == 200:
             data = r.json()
@@ -39,23 +40,15 @@ def get_hyper_fast_tokens():
             for p in pairs:
                 liq = float((p.get("liquidity") or {}).get("usd") or 0)
                 fdv = float(p.get("fdv") or 0)
-                pair_created = p.get("pairCreatedAt", 0)
                 
-                price_change = p.get("priceChange", {})
-                m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
-                
-                # شروط الصيد المبكر جداً (عند الولادة الحقيقية)
-                now_ts = time.time() * 1000
-                # أن تكون أُنشئت في آخر 30 دقيقة فقط، وسيولة مناسبة للبدايات، وبداية زخم صاعد فوري
-                is_brand_new = (pair_created > 0) and ((now_ts - pair_created) < 1800000)
-                
-                if is_brand_new and 500 <= liq <= 250000 and 0 < fdv <= 800000 and m5_change > 0:
+                # شروط مرنة وسريعة لضمان ظهور النتائج فوراً في اللوحة
+                if liq > 200 and fdv > 0:
                     approved_tokens.append(p)
                     
     except Exception as e:
-        log.error(f"خطأ في الجلب المبكر الفائق: {e}")
+        log.error(f"خطأ في جلب التوكنات: {e}")
         
-    return approved_tokens[:10]
+    return approved_tokens[:15]
 
 # ==================== الإرسال الفوري ====================
 
@@ -68,9 +61,6 @@ def send_genesis_alert(token):
     fdv = float(token.get("fdv") or 0)
     liquidity = float((token.get("liquidity") or {}).get("usd") or 0)
     
-    price_change = token.get("priceChange", {})
-    m5_change = float(price_change.get("m5") or 0) if isinstance(price_change, dict) else 0.0
-    
     defined_url = f"https://www.defined.fi/{chain}/{token_address}"
     okx_trade_url = f"https://www.okx.com/web3/dex-market?chainId={chain}&tokenAddress={token_address}"
     
@@ -80,30 +70,30 @@ def send_genesis_alert(token):
         fdv_str = f"{fdv / 1000:.1f}K"
 
     message = (
-        f"⚡🚀 **EARLY BIRTH GENESIS ({chain_upper})**\n"
-        f"🔥 Initial Launch Caught Instantly\n\n"
+        f"⚡🚀 **NEW GENESIS SIGNAL ({chain_upper})**\n\n"
         f"🌐 **السلسلة:** `{chain_upper}`\n"
         f"🪙 **التوكن:** {name} (`{symbol}`)\n"
-        f"🚀 **FDV:** `{fdv_str} 🚀`\n"
-        f"📈 **التغير اللحظي (5m):** `+{m5_change:.1f}%`\n"
-        f"💧 **السيولة الأولية:** `${liquidity:,.0f}`\n\n"
+        f"🚀 **FDV:** `{fdv_str}`\n"
+        f"💧 **السيولة:** `${liquidity:,.0f}`\n\n"
         f"🔑 **العقد (CA):**\n`{token_address}`\n\n"
-        f"🛡️ **التنفيذ والتحليل المبكر:**\n"
+        f"🛡️ **روابط التحليل والتنفيذ:**\n"
         f"📊 [Defined.fi]({defined_url})\n"
-        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})\n"
-        f"🎯 [GMGN]({token_address})"
+        f"⚡ [شراء مباشر OKX DEX]({okx_trade_url})"
     )
 
     signal = {
-        "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "change": f"+{m5_change:.1f}%", "liquidity": liquidity,
+        "chain": chain_upper, "symbol": symbol, "fdv": fdv_str, "liquidity": liquidity,
         "address": token_address, "defined_url": defined_url, "okx_url": okx_trade_url,
         "time": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     }
-    recent_signals.insert(0, signal)
-    if len(recent_signals) > 60:
-        recent_signals.pop()
+    
+    # عدم تكرار نفس التوكن في القائمة المؤقتة
+    if not any(s["address"] == token_address for s in recent_signals):
+        recent_signals.insert(0, signal)
+        if len(recent_signals) > 50:
+            recent_signals.pop()
 
-    log.info(f"صيد ولادة مبكرة [{chain_upper}]: {symbol}")
+    log.info(f"إشارة جديدة [{chain_upper}]: {symbol}")
 
     if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
         try:
@@ -120,20 +110,20 @@ def send_genesis_alert(token):
 def run_sniper_loop():
     while True:
         try:
-            tokens = get_hyper_fast_tokens()
+            tokens = get_fast_tokens()
             for token in tokens:
                 token_address = token.get("baseToken", {}).get("address", "")
                 if not token_address:
                     continue
                 
                 last_alert = alerted_tokens.get(token_address)
-                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=2):
+                if last_alert and (datetime.utcnow() - last_alert) < timedelta(hours=1):
                     continue
                 
                 send_genesis_alert(token)
                 alerted_tokens[token_address] = datetime.utcnow()
         except Exception as e:
-            log.error(f"خطأ في حلقة الرصد المبكر: {e}")
+            log.error(f"خطأ في الحلقة: {e}")
             
         time.sleep(SCAN_INTERVAL)
 
@@ -146,34 +136,32 @@ DASHBOARD_HTML = """
 <html dir="rtl" lang="ar">
 <head>
 <meta charset="UTF-8">
-<title>Early Birth Genesis Sniper</title>
+<title>Fast Genesis Sniper</title>
 <meta http-equiv="refresh" content="3">
 <style>
   body { font-family: 'Segoe UI', Tahoma, sans-serif; background: #0f1115; color: #eee; padding: 20px; }
-  h1 { color: #facc15; }
-  table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-  th, td { padding: 12px; text-align: right; border-bottom: 1px solid #2a2d34; }
+  h1 { color: #facc15; font-size: 24px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 14px; }
+  th, td { padding: 10px; text-align: right; border-bottom: 1px solid #2a2d34; }
   th { color: #888; font-weight: normal; }
   tr:hover { background: #1a1d24; }
-  .ca { color: #38bdf8; font-family: monospace; font-size: 14px; }
+  .ca { color: #38bdf8; font-family: monospace; }
   .badge { background: #1e293b; color: #38bdf8; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-  .btn-okx { background: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 13px; }
-  .btn-def { background: #059669; color: #fff; padding: 4px 10px; border-radius: 4px; text-decoration: none; font-size: 13px; }
-  .green { color: #4ade80; font-weight: bold; }
+  .btn-okx { background: #2563eb; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
+  .btn-def { background: #059669; color: #fff; padding: 4px 8px; border-radius: 4px; text-decoration: none; }
 </style>
 </head>
 <body>
-  <h1>⚡🚀 Early Birth Genesis Sniper (Instant Catch)</h1>
-  <p>رصد العملات لحظة ولادتها الأولى قبل تضخم التداولات | الصفقات المتاحة: {{ signals|length }}</p>
+  <h1>⚡ Fast Genesis Sniper (Live)</h1>
+  <p>الرصد المباشر للتوكنات | إجمالي العملات المعروضة: {{ signals|length }}</p>
   <table>
-    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>التغير (5m)</th><th>السيولة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
+    <tr><th>الوقت (UTC)</th><th>السلسلة</th><th>العملة</th><th>FDV</th><th>السيولة</th><th>العقد (CA)</th><th>Defined</th><th>OKX DEX</th></tr>
     {% for s in signals %}
     <tr>
       <td>{{ s.time }}</td>
       <td><span class="badge">{{ s.chain }}</span></td>
       <td><b>{{ s.symbol }}</b></td>
       <td style="color: #facc15;">{{ s.fdv }} 🚀</td>
-      <td class="green">{{ s.change }}</td>
       <td>${{ "%.0f"|format(s.liquidity) }}</td>
       <td class="ca">{{ s.address }}</td>
       <td><a href="{{ s.defined_url }}" target="_blank" class="btn-def">Defined ↗</a></td>
