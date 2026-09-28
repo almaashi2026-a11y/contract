@@ -1,18 +1,16 @@
 import time
 import requests
 import os
-from threading import Thread
 from flask import Flask
 
-# إعداد خادم وهمي لإرضاء منصة Render ومنع إغلاق البورت
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "Explosion Sniper Pro is Alive and Running!"
+    return "Bot is running!"
 
 def run_web():
-    port = int(os.environ.get("PORT", 8080))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
 
 # إعدادات البوت والربط مع تيليجرام
@@ -37,8 +35,7 @@ def professional_sniper_engine():
         response = requests.get(url, timeout=5)
         data = response.json()
         pairs = data.get("pairs", [])
-    except Exception as e:
-        print(f"خطأ في الاتصال بالشبكة: {e}")
+    except Exception:
         return
 
     for pair in pairs:
@@ -67,27 +64,26 @@ def professional_sniper_engine():
 • السيولة الآمنة: `${liquidity:,.0f}` 🟢
 • زخم الـ 5m: `+{price_change_5m}%` 🔥
 
-🔗 **روابط الفحص المباشر والتحليل:**
+🔗 **روابط الفحص المباشر:**
 • [Defined Charts](https://defined.fi/token/{ca})
 • [BubbleMaps](https://app.bubblemaps.io/)
 
-⚡ *تذكرها: صفقة واحدة في اليوم تضمن لك التركيز والنجاح!*
+⚡ *التزم بقاعدة: صفقة واحدة في اليوم!*
 """
             send_telegram_alert(alert_message)
             time.sleep(2)
         except Exception:
             continue
 
-def run_sniper_loop():
+if __name__ == "__main__":
+    import threading
+    # تشغيل سيرفر الويب في الخلفية بشكل سريع جداً لتلبية طلب البورت
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
+    
+    # حلقة البوت الأساسية
     while True:
         print("🛡️ جاري مسح السوق وبحث الفرص...")
         professional_sniper_engine()
         time.sleep(90)
-
-if __name__ == "__main__":
-    # تشغيل الخادم الوهمي في خلفية منفصلة لإرضاء المنصة
-    t = Thread(target=run_web)
-    t.start()
-    
-    # تشغيل حلقة البوت الأساسية
-    run_sniper_loop()
