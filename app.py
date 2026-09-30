@@ -19,12 +19,12 @@ def send_telegram_alert(message):
         "parse_mode": "Markdown"
     }
     try:
-        # تقليص الوقت المستقطع لأقصى سرعة إرسال ممكنة
-        requests.post(url, json=payload, timeout=2)
+        requests.post(url, json=payload, timeout=1.5)
     except Exception:
         pass
 
-lightning_tokens = []
+# قائمة تخزين مؤقت للعملات المرصودة بأعلى سرعة
+multichain_tokens = []
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -32,26 +32,27 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="refresh" content="8"> <!-- تحديث سريع جداً كل 8 ثوانٍ -->
-    <title>Lightning Speed Sniper - عبد الرحمن</title>
+    <meta http-equiv="refresh" content="5"> <!-- تحديث تلقائي فائق السرعة كل 5 ثوانٍ -->
+    <title>Multi-Chain Lightning Sniper - عبد الرحمن</title>
     <style>
-        body { background-color: #05070a; color: #00ffcc; font-family: 'Courier New', monospace; margin: 0; padding: 15px; }
+        body { background-color: #030508; color: #00ffcc; font-family: 'Courier New', monospace; margin: 0; padding: 15px; }
         h1 { color: #ff0055; text-align: center; font-size: 20px; text-transform: uppercase; letter-spacing: 2px; }
-        .status-box { background: #0d1117; padding: 8px; border: 1px solid #ff0055; text-align: center; margin-bottom: 15px; font-size: 12px; color: #fff; }
+        .status-box { background: #0d1117; padding: 8px; border: 1px solid #00ffcc; text-align: center; margin-bottom: 15px; font-size: 12px; color: #fff; }
         table { width: 100%; border-collapse: collapse; background: #0d1117; border-radius: 6px; overflow: hidden; border: 1px solid #21262d; }
         th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #21262d; font-size: 12px; }
         th { background: #161b22; color: #8b949e; }
-        tr:hover { background: #ff005515; }
-        .speed-tag { color: #ff0055; font-weight: bold; animation: flash 1s infinite; }
+        tr:hover { background: #00ffcc15; }
+        .chain-badge { background: #7928ca; padding: 2px 6px; border-radius: 4px; font-size: 11px; color: #fff; font-weight: bold; }
+        .speed-tag { color: #ff0055; font-weight: bold; animation: flash 0.8s infinite; }
         .ca-box { color: #58a6ff; background: #010409; padding: 2px 4px; border-radius: 3px; border: 1px solid #30363d; font-size: 11px; }
         @keyframes flash { 0% { opacity: 1; } 50% { opacity: 0.2; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
-    <h1>⚡ LIGHTNING SPEED SNIPER (رصد قبل انتهاء الزخم) ⚡</h1>
+    <h1>⚡ MULTI-CHAIN LIGHTNING SNIPER (جميع السلاسل - رصد لحظي) ⚡</h1>
     
     <div class="status-box">
-        🚀 المحرك يعمل بأقصى تردد لضمان رصد الانطلاقات في أجزاء الثانية الأولى | تحديث الواجهة: كل 8 ثوانٍ
+        🌐 يراقب كافة السلاسل (Solana, Base, ETH, BSC) بأعلى تردد زمني | تحديث الواجهة: كل 5 ثوانٍ
     </div>
 
     <table>
@@ -69,7 +70,7 @@ HTML_TEMPLATE = """
         <tbody>
             {% for item in data %}
             <tr>
-                <td><b>{{ item.chain | upper }}</b></td>
+                <td><span class="chain-badge">{{ item.chain | upper }}</span></td>
                 <td>{{ item.name }} (<b>{{ item.symbol }}</b>)</td>
                 <td class="speed-tag">انطلاقة مبكرة 🔥</td>
                 <td>${{ "{:,.0f}".format(item.mcap) }}</td>
@@ -82,7 +83,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="color: #8b949e; padding: 20px;">جاري التقاط أول شمعة انطلاق في السوق الفوري...</td>
+                <td colspan="7" style="color: #8b949e; padding: 20px;">جاري رصد أحدث الصفقات والانطلاقات عبر جميع الشبكات...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -91,34 +92,34 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def lightning_fast_engine():
-    global lightning_tokens
+def multichain_lightning_engine():
+    global multichain_tokens
     seen_addresses = set()
     
-    # الاعتماد على نقاط التحديث المباشر للتوكنات الجديدة كلياً
+    # مصادر متعددة لضمان شمولية جميع السلاسل والسرعة القصوى
     endpoints = [
         "https://api.dexscreener.com/token-profiles/latest/v1",
-        "https://api.dexscreener.com/latest/dex/search?q=solana"
+        "https://api.dexscreener.com/latest/dex/search?q=solana",
+        "https://api.dexscreener.com/latest/dex/search?q=base",
+        "https://api.dexscreener.com/latest/dex/search?q=ethereum"
     ]
     
     while True:
         temp_results = []
         for endpoint in endpoints:
             try:
-                res = requests.get(endpoint, timeout=3)
+                res = requests.get(endpoint, timeout=2.5)
                 data = res.json()
                 
-                # معالجة القوائم حسب شكل الاستجابة
                 items = data if isinstance(data, list) else data.get("pairs", [])
                 
-                for item in items[:15]:
+                for item in items[:10]: # فحص أسرع وأكثر تركيزاً
                     ca = item.get("tokenAddress") or item.get("baseToken", {}).get("address")
-                    chain = item.get("chainId", "solana")
+                    chain = item.get("chainId", "multi")
                     
                     if not ca or ca in seen_addresses:
                         continue
                     
-                    # إذا كانت الاستجابة من البحث العام، نستخرج البيانات مباشرة
                     if "pairs" in endpoint or "baseToken" in item:
                         pair = item
                         name = pair.get("baseToken", {}).get("name", "Unknown")
@@ -126,8 +127,7 @@ def lightning_fast_engine():
                         liquidity = pair.get("liquidity", {}).get("usd", 0)
                         mcap = pair.get("marketCap", 0)
                     else:
-                        # جلب تفاصيل سريعة جداً للعقد الجديد
-                        detail_res = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{ca}", timeout=2)
+                        detail_res = requests.get(f"https://api.dexscreener.com/latest/dex/tokens/{ca}", timeout=1.5)
                         pairs = detail_res.json().get("pairs", [])
                         if not pairs:
                             continue
@@ -137,8 +137,8 @@ def lightning_fast_engine():
                         liquidity = pair.get("liquidity", {}).get("usd", 0)
                         mcap = pair.get("marketCap", 0)
 
-                    # شروط مرنة جداً لالتقاط العملة فور ولادتها وقبل تضخم السعر
-                    if liquidity < 2000 or liquidity > 3000000:
+                    # شروط مرنة لالتقاط العملة أول ما تظهر في السوق وقبل تضخم السيولة
+                    if liquidity < 1500 or liquidity > 5000000:
                         continue
                         
                     seen_addresses.add(ca)
@@ -152,16 +152,16 @@ def lightning_fast_engine():
                     }
                     temp_results.append(token_info)
                     
-                    # تنبيه فوري لا يتأخر أبداً
+                    # تنبيه فوري عبر التيليجرام
                     alert_text = f"""
-⚡ **[LIGHTNING SNIPER - EARLY ENTRY]** ⚡
+⚡ **[MULTI-CHAIN LIGHTNING ALERT]** ⚡
 
 🌐 **الشبكة:** `{chain.upper()}`
 🪙 **العملة:** `{name} ({symbol})`
 📍 **العقد (CA):**
 `{ca}`
 
-📊 **البيانات اللحظية الأولى:**
+📊 **البيانات الأولية:**
 • القيمة السوقية: `${mcap:,.0f}`
 • السيولة: `${liquidity:,.0f}` 🟢
 
@@ -175,17 +175,17 @@ def lightning_fast_engine():
                 continue
                 
         if temp_results:
-            lightning_tokens = temp_results + lightning_tokens[:30] # الاحتفاظ بأحدث الصفقات في الأعلى
+            multichain_tokens = temp_results + multichain_tokens[:40]
             
-        # تقليص فترة الانتظار إلى 5 ثوانٍ فقط لضمان السرعة المطلقة
-        time.sleep(5)
+        # حلقة فحص متواصلة بأقل وقت انتظار ممكن
+        time.sleep(3)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, data=lightning_tokens[:25])
+    return render_template_string(HTML_TEMPLATE, data=multichain_tokens[:30])
 
 if __name__ == "__main__":
-    engine_thread = threading.Thread(target=lightning_fast_engine)
+    engine_thread = threading.Thread(target=multichain_lightning_engine)
     engine_thread.daemon = True
     engine_thread.start()
     
