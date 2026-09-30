@@ -8,7 +8,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Sniper Bot is Running Successfully!"
+    return "Sniper Bot Active & Ready!"
 
 def run_web():
     port = int(os.environ.get("PORT", 10000))
@@ -30,13 +30,17 @@ def send_telegram_alert(message):
         print(f"خطأ في إرسال التنبيه: {e}")
 
 def direct_sniper_engine():
-    url = "https://api.dexscreener.com/latest/dex/tokens/So11111111111111111111111111111111111111112"
+    # استخدام محرك البحث العام المباشر لجلب أحدث عملات سولانا النشطة
+    url = "https://api.dexscreener.com/latest/dex/search?q=solana"
     try:
         response = requests.get(url, timeout=5)
         data = response.json()
         pairs = data.get("pairs", [])
-    except Exception:
+    except Exception as e:
+        print(f"خطأ في الاتصال: {e}")
         return
+
+    print(f"🔍 تم العثور على {len(pairs)} عملة في الفحص الحالي...")
 
     for pair in pairs:
         try:
@@ -52,11 +56,12 @@ def direct_sniper_engine():
             if price_change_5m is None:
                 price_change_5m = 0
                 
-            if liquidity < 5000 or liquidity > 2000000:
+            # شروط مرنة جداً لضمان ظهور النتائج فوراً
+            if liquidity < 1000:
                 continue
                 
             alert_message = f"""
-🎯 **[SNIPER TARGET FOUND]** 🎯
+🎯 **[LIVE SNIPER ALERT]** 🎯
 
 🪙 **العملة:** `{token_name} ({token_symbol})`
 📍 **عقد العملة (CA):**
@@ -72,7 +77,9 @@ def direct_sniper_engine():
 • [BubbleMaps](https://app.bubblemaps.io/token/{ca})
 """
             send_telegram_alert(alert_message)
+            print(f"✅ تم إرسال تنبيه للعملة: {token_symbol}")
             time.sleep(2)
+            break # يرسل عملة واحدة في كل دورة لكي لا يحدث ضغط، ثم يتابع
         except Exception:
             continue
 
@@ -83,4 +90,4 @@ if __name__ == "__main__":
     
     while True:
         direct_sniper_engine()
-        time.sleep(60)
+        time.sleep(30) # فحص كل 30 ثانية
