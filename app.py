@@ -1,95 +1,120 @@
-import time
-import requests
 import os
-from flask import Flask
-import threading
+import requests
+from flask import Flask, render_template_string, request
 
-app = Flask('')
+app = Flask(__name__)
+
+# قالب HTML بتصميم تداولي احترافي (Dark Theme) لعرض التدفقات والعقود بوضوح
+HTML_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tape Flow & Sniper Terminal - عبد الرحمن</title>
+    <style>
+        body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
+        h1 { color: #58a6ff; text-align: center; font-size: 24px; margin-bottom: 20px; }
+        .filter-box { background: #161b22; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; justify-content: center; align-items: center; border: 1px solid #30363d; }
+        input, select { background: #0d1117; color: #fff; border: 1px solid #30363d; padding: 8px 12px; border-radius: 5px; }
+        button { background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2ea043; }
+        table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
+        th, td { padding: 12px 15px; text-align: center; border-bottom: 1px solid #30363d; font-size: 14px; }
+        th { background: #21262d; color: #8b949e; }
+        tr:hover { background: #1f6feb15; }
+        .buy { color: #3fb950; font-weight: bold; }
+        .sell { color: #f85149; font-weight: bold; }
+        .ca-link { color: #58a6ff; text-decoration: none; font-family: monospace; }
+        .ca-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <h1>⚡ Tape Flow & Institutional Sniper Terminal ⚡</h1>
+    
+    <div class="filter-box">
+        <form method="GET" action="/">
+            <label>الحد الأدنى للسيولة ($):</label>
+            <input type="number" name="min_liq" value="{{ min_liq }}">
+            <label>نوع العملية:</label>
+            <select name="action_type">
+                <option value="all" {% if action_type == 'all' %}selected{% endif %}>الجميع</option>
+                <option value="buy" {% if action_type == 'buy' %}selected{% endif %}>شراء فقط</option>
+            </select>
+            <button type="submit">تطبيق الفلتر</button>
+        </form>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>الرمز المميز (Token)</th>
+                <th>الحالة / الاتجاه</th>
+                <th>القيمة السوقية (MCap)</th>
+                <th>السيولة ($)</th>
+                <th>العقد (CA)</th>
+                <th>روابط الفحص</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in data %}
+            <tr>
+                <td><b>{{ item.name }}</b> ({{ item.symbol }})</td>
+                <td class="buy">شراء 🟢</td>
+                <td>${{ "{:,.0f}".format(item.mcap) }}</td>
+                <td>${{ "{:,.0f}".format(item.liquidity) }}</td>
+                <td><span class="ca-link">{{ item.ca[:6] }}...{{ item.ca[-4:] }}</span></td>
+                <td>
+                    <a href="https://defined.fi/token/{{ item.ca }}" target="_blank" style="color: #58a6ff; margin-left: 10px;">Charts</a>
+                    <a href="https://app.bubblemaps.io/token/{{ item.ca }}" target="_blank" style="color: #f0883e;">BubbleMaps</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="6" style="color: #8b949e; padding: 20px;">جاري جلب التدفقات الحية وتطبيق الفلاتر...</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
+"""
 
 @app.route('/')
-def home():
-    return "Sniper Bot Running & Active!"
-
-def run_web():
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-
-TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "YOUR_CHAT_ID"
-
-def send_telegram_alert(message):
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TELEGRAM_CHAT_ID,
-        "text": message,
-        "parse_mode": "Markdown"
-    }
+def index():
+    min_liq = request.args.get('min_liq', '10000')
     try:
-        requests.post(url, json=payload, timeout=5)
-    except Exception as e:
-        print(f"خطأ في إرسال التنبيه: {e}")
+        min_liq_val = float(min_liq)
+    except:
+        min_liq_val = 10000.0
 
-def direct_sniper_engine():
-    # استخدام نقطة البحث المباشرة الموثوقة لأزواج سولانا
-    url = "https://api.dexscreener.com/latest/dex/search?q=SOL"
+    action_type = request.args.get('action_type', 'all')
+
+    # جلب البيانات الحية من DexScreener للعملات النشطة على سولانا
+    url = "https://api.dexscreener.com/latest/dex/search?q=solana"
+    parsed_data = []
     try:
         response = requests.get(url, timeout=5)
-        data = response.json()
-        pairs = data.get("pairs", [])
-    except Exception as e:
-        print(f"خطأ في الاتصال: {e}")
-        return
-
-    print(f"🔍 تم جلب {len(pairs)} زوج محلياً للتصفية...")
-
-    for pair in pairs:
-        try:
-            # التحقق من أن الشبكة هي سولانا حصراً
+        pairs = response.json().get("pairs", [])
+        for pair in pairs:
             if pair.get("chainId") != "solana":
                 continue
-                
-            token_name = pair.get("baseToken", {}).get("name", "Unknown")
-            token_symbol = pair.get("baseToken", {}).get("symbol", "")
-            ca = pair.get("baseToken", {}).get("address", "")
             liquidity = pair.get("liquidity", {}).get("usd", 0)
-            mcap = pair.get("marketCap", 0)
-            
-            price_change_5m = pair.get("priceChange", {}).get("m5", 0)
-            if price_change_5m is None:
-                price_change_5m = 0
-                
-            # شروط مبسطة جداً لضمان خروج أول نتيجة والتأكد من إرسالها لتليجرام
-            if liquidity <= 0:
+            if liquidity < min_liq_val:
                 continue
                 
-            alert_message = f"""
-🎯 **[TEST SNIPER ALERT]** 🎯
+            parsed_data.append({
+                "name": pair.get("baseToken", {}).get("name", "Unknown"),
+                "symbol": pair.get("baseToken", {}).get("symbol", ""),
+                "ca": pair.get("baseToken", {}).get("address", ""),
+                "liquidity": liquidity,
+                "mcap": pair.get("marketCap", 0)
+            })
+    except Exception as e:
+        print(f"Error fetching data: {e}")
 
-🪙 **العملة:** `{token_name} ({token_symbol})`
-📍 **عقد العملة (CA):**
-`{ca}`
-
-📊 **البيانات:**
-• القيمة السوقية (MC): `${mcap:,.0f}`
-• السيولة: `${liquidity:,.0f}` 🟢
-• الزخم (5m): `+{price_change_5m}%` 🔥
-
-🔗 **روابط الفحص:**
-• [Defined Charts](https://defined.fi/token/{ca})
-• [BubbleMaps](https://app.bubblemaps.io/token/{ca})
-"""
-            send_telegram_alert(alert_message)
-            print(f"✅ تم إرسال تنبيه ناجح للعملة: {token_symbol}")
-            time.sleep(2)
-            break # يرسل عملة واحدة للتأكد من وصولها ثم يكمل في الدورات القادمة
-        except Exception:
-            continue
+    return render_template_string(HTML_TEMPLATE, data=parsed_data[:20], min_liq=min_liq, action_type=action_type)
 
 if __name__ == "__main__":
-    t = threading.Thread(target=run_web)
-    t.daemon = True
-    t.start()
-    
-    while True:
-        direct_sniper_engine()
-        time.sleep(30)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
