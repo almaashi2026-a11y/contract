@@ -24,6 +24,7 @@ def send_telegram_alert(message):
     except Exception as e:
         print(f"خطأ في إرسال التنبيه: {e}")
 
+# تخزين مؤقت للنتائج المرصودة عبر الفلتر المبكر
 latest_scanned_tokens = []
 
 HTML_TEMPLATE = """
@@ -32,29 +33,43 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Institutional Sniper Terminal - عبد الرحمن</title>
+    <title>Early Momentum Sniper Filter - عبد الرحمن</title>
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
         h1 { color: #58a6ff; text-align: center; font-size: 24px; margin-bottom: 20px; }
+        .filter-box { background: #161b22; padding: 15px; border-radius: 8px; margin-bottom: 20px; display: flex; gap: 15px; justify-content: center; align-items: center; border: 1px solid #30363d; }
+        input { background: #0d1117; color: #fff; border: 1px solid #30363d; padding: 8px 12px; border-radius: 5px; }
+        button { background: #238636; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #2ea043; }
         table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
         th, td { padding: 12px 15px; text-align: center; border-bottom: 1px solid #30363d; font-size: 14px; }
         th { background: #21262d; color: #8b949e; }
         tr:hover { background: #1f6feb15; }
-        .buy { color: #3fb950; font-weight: bold; }
+        .momentum { color: #3fb950; font-weight: bold; }
         .chain-tag { background: #30363d; padding: 3px 8px; border-radius: 4px; font-size: 12px; color: #58a6ff; }
-        .ca-link { color: #58a6ff; text-decoration: none; font-family: monospace; }
+        .ca-link { color: #58a6ff; font-family: monospace; }
     </style>
 </head>
 <body>
-    <h1>⚡ Direct Sniper & Flow Terminal ⚡</h1>
+    <h1>🚀 Early Momentum Sniper Filter (فلسفة صيد الزخم المبكر) 🚀</h1>
+    
+    <div class="filter-box">
+        <form method="GET" action="/">
+            <label>الحد الأدنى للسيولة ($):</label>
+            <input type="number" name="min_liq" value="{{ min_liq }}">
+            <button type="submit">تحديث الفلتر</button>
+        </form>
+    </div>
+
     <table>
         <thead>
             <tr>
                 <th>الشبكة</th>
                 <th>الرمز المميز</th>
-                <th>الحالة</th>
+                <th>الحالة والمؤشر</th>
                 <th>القيمة السوقية (MCap)</th>
                 <th>السيولة ($)</th>
+                <th>زخم 5 دقائق</th>
                 <th>عقد العملة (CA)</th>
                 <th>روابط الفحص</th>
             </tr>
@@ -64,9 +79,10 @@ HTML_TEMPLATE = """
             <tr>
                 <td><span class="chain-tag">{{ item.chain | upper }}</span></td>
                 <td><b>{{ item.name }}</b> ({{ item.symbol }})</td>
-                <td class="buy">نشط 🟢</td>
+                <td class="momentum">زخم مبكر صاعد 🔥</td>
                 <td>${{ "{:,.0f}".format(item.mcap) }}</td>
                 <td>${{ "{:,.0f}".format(item.liquidity) }}</td>
+                <td style="color: #3fb950;">+{{ item.price_change_5m }}%</td>
                 <td><span class="ca-link">{{ item.ca }}</span></td>
                 <td>
                     <a href="https://defined.fi/token/{{ item.ca }}" target="_blank" style="color: #58a6ff; margin-left: 10px;">Charts</a>
@@ -75,7 +91,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="color: #8b949e; padding: 20px;">جاري جلب البيانات المباشرة للأسواق...</td>
+                <td colspan="8" style="color: #8b949e; padding: 20px;">جاري رصد إشارات الزخم المبكر واكتشاف الفرص...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -84,80 +100,105 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def direct_market_scanner():
+def momentum_sniper_scanner():
+    """
+    فلتر الزخم المبكر: يبحث عن العملات ذات القيمة السوقية المناسبة والتي تشهد ارتفاعاً وزخماً في أول دقائق التداول
+    """
     global latest_scanned_tokens
+    queries = ["solana", "ethereum", "bsc", "base"]
     sent_alerts = set()
-    
-    # استخدام رابط جلب أحدث البروفايلات والتوكنات المضافة مباشرة
-    url = "https://api.dexscreener.com/token-profiles/latest/v1"
     
     while True:
         temp_list = []
-        try:
-            res = requests.get(url, timeout=5)
-            profiles = res.json()
-            
-            if isinstance(profiles, list):
-                for p in profiles[:20]:
-                    ca = p.get("tokenAddress")
-                    chain = p.get("chainId", "solana")
-                    if not ca:
+        seen_cas = set()
+        
+        for q in queries:
+            url = f"https://api.dexscreener.com/latest/dex/search?q={q}"
+            try:
+                res = requests.get(url, timeout=4)
+                pairs = res.json().get("pairs", [])
+                for pair in pairs:
+                    chain = pair.get("chainId", "unknown")
+                    ca = pair.get("baseToken", {}).get("address", "")
+                    
+                    if not ca or ca in seen_cas:
+                        continue
+                    seen_cas.add(ca)
+                    
+                    liquidity = pair.get("liquidity", {}).get("usd", 0)
+                    mcap = pair.get("marketCap", 0)
+                    
+                    # قراءة الزخم وتغير السعر في آخر 5 دقائق
+                    price_change_5m = pair.get("priceChange", {}).get("m5", 0)
+                    if price_change_5m is None:
+                        price_change_5m = 0
+                        
+                    # --- معايير فلتر الزخم المبكر المستوحاة من الاستراتيجية ---
+                    # 1. سيولة مقبولة وآمنة (مثلاً بين 10,000$ و 1,500,000$) لمنع العملات الميتة أو الضخمة المزدحمة
+                    if liquidity < 10000 or liquidity > 1500000:
                         continue
                         
-                    # جلب تفاصيل الزوج لكل عقد
-                    detail_url = f"https://api.dexscreener.com/latest/dex/tokens/{ca}"
-                    detail_res = requests.get(detail_url, timeout=3)
-                    pairs = detail_res.json().get("pairs", [])
+                    # 2. زخم مبكر إيجابي (ارتفاع بين 2% و 50% في آخر 5 دقائق لضمان الالتقاط مبكراً)
+                    if price_change_5m < 2.0 or price_change_5m > 50.0:
+                        continue
+                        
+                    token_data = {
+                        "chain": chain,
+                        "name": pair.get("baseToken", {}).get("name", "Unknown"),
+                        "symbol": pair.get("baseToken", {}).get("symbol", ""),
+                        "ca": ca,
+                        "liquidity": liquidity,
+                        "mcap": mcap,
+                        "price_change_5m": price_change_5m
+                    }
+                    temp_list.append(token_data)
                     
-                    for pair in pairs:
-                        liquidity = pair.get("liquidity", {}).get("usd", 0)
-                        mcap = pair.get("marketCap", 0)
-                        
-                        token_data = {
-                            "chain": chain,
-                            "name": pair.get("baseToken", {}).get("name", "Unknown"),
-                            "symbol": pair.get("baseToken", {}).get("symbol", ""),
-                            "ca": ca,
-                            "liquidity": liquidity,
-                            "mcap": mcap
-                        }
-                        temp_list.append(token_data)
-                        
-                        if ca not in sent_alerts:
-                            sent_alerts.add(ca)
-                            alert_msg = f"""
-🎯 **[DIRECT SNIPER ALERT]** 🎯
+                    # إرسال تنبيه تليجرام فوري للاستراتيجية المبكرة
+                    if ca not in sent_alerts:
+                        sent_alerts.add(ca)
+                        alert_msg = f"""
+🚀 **[EARLY MOMENTUM SNIPER ALERT]** 🚀
 
 🌐 **الشبكة:** `{chain.upper()}`
 🪙 **العملة:** `{token_data['name']} ({token_data['symbol']})`
 📍 **عقد العملة (CA):**
 `{ca}`
 
-📊 **البيانات اللحظية:**
+📊 **مؤشرات الزخم المبكر:**
 • القيمة السوقية: `${mcap:,.0f}`
 • السيولة: `${liquidity:,.0f}` 🟢
+• زخم الـ 5 دقائق: `+{price_change_5m}%` 🔥
 
-🔗 **روابط الفحص:**
+🔗 **روابط الفحص السريع:**
 • [Defined Charts](https://defined.fi/token/{ca})
 • [BubbleMaps](https://app.bubblemaps.io/token/{ca})
+
+🎯 *استراتيجية الزخم المبكر: راقب الحجم، تأكد من المحافظ، واقتنص صفقتك بذكاء!*
 """
-                            send_telegram_alert(alert_msg)
-                            time.sleep(1)
-                        break
-        except Exception as e:
-            print(f"Scanner error: {e}")
-            
+                        send_telegram_alert(alert_msg)
+                        time.sleep(1)
+                        
+            except Exception as e:
+                print(f"Scanner error: {e}")
+                
         if temp_list:
-            latest_scanned_tokens = temp_list
+            latest_scanned_tokens = temp_list[:40]
             
-        time.sleep(45)
+        time.sleep(30)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, data=latest_scanned_tokens)
+    min_liq = request.args.get('min_liq', '10000')
+    try:
+        min_val = float(min_liq)
+    except:
+        min_val = 10000.0
+        
+    filtered = [t for t in latest_scanned_tokens if t['liquidity'] >= min_val]
+    return render_template_string(HTML_TEMPLATE, data=filtered, min_liq=min_liq)
 
 if __name__ == "__main__":
-    scanner_thread = threading.Thread(target=direct_market_scanner)
+    scanner_thread = threading.Thread(target=momentum_sniper_scanner)
     scanner_thread.daemon = True
     scanner_thread.start()
     
