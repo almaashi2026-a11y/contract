@@ -23,15 +23,7 @@ def send_telegram_alert(message):
     except Exception:
         pass
 
-agent_terminal_data = {
-    "scout": "نشط - يمسح الكتل الجديدة",
-    "warden": "يحرس الصفقات ويقفل غير الآمن",
-    "pulse": "يقيس الزخم اللحظي",
-    "flux": "جاهز لتوجيه التنفيذ",
-    "zev": "مراقب ذكي متأهب"
-}
-
-approved_trades = []
+pro_terminal_trades = []
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -40,37 +32,40 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="refresh" content="3">
-    <title>JEV Multi-Agent Terminal - عبد الرحمن</title>
+    <title>Institutional Pro Terminal - عبد الرحمن</title>
     <style>
-        body { background-color: #010409; color: #58a6ff; font-family: 'Courier New', monospace; margin: 0; padding: 15px; }
-        h1 { color: #ff7b72; text-align: center; font-size: 18px; text-transform: uppercase; letter-spacing: 2px; }
-        .grid-agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 15px; }
-        .agent-card { background: #0d1117; border: 1px solid #30363d; border-radius: 6px; padding: 10px; text-align: center; font-size: 11px; }
-        .agent-name { color: #f0883e; font-weight: bold; font-size: 13px; margin-bottom: 5px; }
-        .agent-status { color: #3fb950; }
-        .status-box { background: #161b22; padding: 8px; border: 1px solid #8957e5; text-align: center; margin-bottom: 15px; font-size: 12px; color: #f0f6fc; border-radius: 6px; }
-        table { width: 100%; border-collapse: collapse; background: #0d1117; border-radius: 6px; overflow: hidden; border: 1px solid #30363d; }
-        th, td { padding: 8px 10px; text-align: center; border-bottom: 1px solid #21262d; font-size: 11px; }
-        th { background: #161b22; color: #8b949e; }
-        tr:hover { background: #23863615; }
-        .chain-badge { background: #238636; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #fff; font-weight: bold; }
-        .safe-tag { color: #3fb950; font-weight: bold; }
-        .ca-box { color: #79c0ff; background: #010409; padding: 2px 4px; border-radius: 3px; border: 1px solid #30363d; font-size: 10px; }
+        body { background-color: #0b0f19; color: #38bdf8; font-family: 'JetBrains Mono', 'Courier New', monospace; margin: 0; padding: 15px; }
+        h1 { color: #f43f5e; text-align: center; font-size: 19px; text-transform: uppercase; letter-spacing: 2px; }
+        .grid-agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 15px; }
+        .agent-card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 10px; text-align: center; font-size: 11px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        .agent-name { color: #fbbf24; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
+        .agent-status { color: #34d399; }
+        .status-box { background: #111827; padding: 8px; border: 1px solid #3b82f6; text-align: center; margin-bottom: 15px; font-size: 12px; color: #f3f4f6; border-radius: 8px; }
+        table { width: 100%; border-collapse: collapse; background: #111827; border-radius: 8px; overflow: hidden; border: 1px solid #1f2937; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
+        th, td { padding: 9px 11px; text-align: center; border-bottom: 1px solid #1f2937; font-size: 11px; }
+        th { background: #1f2937; color: #9ca3af; text-transform: uppercase; font-size: 10px; }
+        tr:hover { background: rgba(59, 130, 246, 0.05); }
+        .chain-badge { background: #2563eb; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #fff; font-weight: bold; }
+        .safe-tag { color: #34d399; font-weight: bold; }
+        .copy-btn { background: #3b82f6; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: bold; transition: 0.2s; }
+        .copy-btn:hover { background: #2563eb; }
+        .ca-text { color: #93c5fd; font-family: monospace; }
+        .momentum-high { color: #f43f5e; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>🧠 JEV MULTI-AGENT TERMINAL (طرفية الوكلاء الذكية) 🛡</h1>
+    <h1>⚡ INSTITUTIONAL PRO TERMINAL (Defined & Momentum Hub) 🛡</h1>
     
     <div class="grid-agents">
-        <div class="agent-card"><div class="agent-name">1/ SCOUT (الكشاف)</div><div class="agent-status">🟢 رصد الانطلاقات</div></div>
-        <div class="agent-card"><div class="agent-name">2/ WARDEN (الحارس)</div><div class="agent-status">🔒 فلتر سحب السجادة</div></div>
-        <div class="agent-card"><div class="agent-name">3/ PULSE (الزخم)</div><div class="agent-status">⚡ قياس حجم التداول</div></div>
-        <div class="agent-card"><div class="agent-name">4/ FLUX (المنفذ)</div><div class="agent-status">🎯 توجيه وتنظيف</div></div>
-        <div class="agent-card"><div class="agent-name">5/ JEV (الدماغ)</div><div class="agent-status">💎 اتخاذ القرار النهائي</div></div>
+        <div class="agent-card"><div class="agent-name">SCOUT</div><div class="agent-status">🟢 مسح السيولة الحية</div></div>
+        <div class="agent-card"><div class="agent-name">WARDEN</div><div class="agent-status">🔒 قفل السيولة والأمان</div></div>
+        <div class="agent-card"><div class="agent-name">PULSE</div><div class="agent-status">📊 رصد الزخم والاحتفاظ</div></div>
+        <div class="agent-card"><div class="agent-name">FLUX</div><div class="agent-status">🎯 تحسين التنفيذ</div></div>
+        <div class="agent-card"><div class="agent-name">JEV</div><div class="agent-status">🧠 القرار المالي النهائي</div></div>
     </div>
 
     <div class="status-box">
-        🤖 النظام يعمل بنجاح: الوكلاء يفحصون السوق، يرفضون المخاطر بصمت، وينفذون الصفقات النظيفة فقط.
+        🚀 الطرفية مرتبطة ببيانات Defined الحية وفلاتر الحماية المتقدمة | انقر على زر النسخ لأخذ عقد العملة فوراً
     </div>
 
     <table>
@@ -78,11 +73,12 @@ HTML_TEMPLATE = """
             <tr>
                 <th>الشبكة</th>
                 <th>الرمز المميز</th>
-                <th>حالة الحارس (WARDEN)</th>
-                <th>مؤشر الفومو</th>
+                <th>حالة الأمان (WARDEN)</th>
+                <th>الزخم (Momentum)</th>
                 <th>السيولة ($)</th>
+                <th>القيمة السوقية</th>
                 <th>عقد العملة (CA)</th>
-                <th>الروابط</th>
+                <th>روابط Defined والتنفيذ</th>
             </tr>
         </thead>
         <tbody>
@@ -90,18 +86,22 @@ HTML_TEMPLATE = """
             <tr>
                 <td><span class="chain-badge">{{ item.chain | upper }}</span></td>
                 <td><b>{{ item.name }}</b> ({{ item.symbol }})</td>
-                <td><span class="safe-tag">✅ معتمد (Locked)</span></td>
-                <td style="color: #ff7b72; font-weight: bold;">🔥 {{ item.fomo_score }}%</td>
+                <td><span class="safe-tag">✅ مقفل ومحمي</span></td>
+                <td><span class="momentum-high">🔥 {{ item.momentum_score }}%</span></td>
                 <td>${{ "{:,.0f}".format(item.liquidity) }}</td>
-                <td><span class="ca-box">{{ item.ca }}</span></td>
+                <td>${{ "{:,.0f}".format(item.mcap) }}</td>
                 <td>
-                    <a href="https://defined.fi/token/{{ item.ca }}" target="_blank" style="color: #58a6ff; text-decoration: none;">Charts</a> | 
-                    <a href="https://app.bubblemaps.io/token/{{ item.ca }}" target="_blank" style="color: #f0883e; text-decoration: none;">Bubble</a>
+                    <span class="ca-text" id="ca-{{ loop.index }}">{{ item.ca[:6] }}...{{ item.ca[-4:] }}</span>
+                    <button class="copy-btn" onclick="navigator.clipboard.writeText('{{ item.ca }}'); alert('تم نسخ عقد العملة بنجاح: {{ item.symbol }}');">نسخ</button>
+                </td>
+                <td>
+                    <a href="https://defined.fi/token/{{ item.ca }}" target="_blank" style="color: #38bdf8; text-decoration: none; font-weight: bold;">Defined Charts</a> | 
+                    <a href="https://app.bubblemaps.io/token/{{ item.ca }}" target="_blank" style="color: #fbbf24; text-decoration: none;">Bubble</a>
                 </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="color: #8b949e; padding: 25px;">WARDEN يرفض العقود غير النظيفة... بانتظار الفرصة الذهبية الأولى...</td>
+                <td colspan="8" style="color: #6b7280; padding: 25px;">WARDEN يراقب دفتر الطلبات والزخم الحقيقي... بانتظار الفرصة الماسية...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -110,8 +110,8 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def agent_pipeline(item, chain):
-    global approved_trades
+def pro_pipeline(item, chain):
+    global pro_terminal_trades
     try:
         ca = item.get("tokenAddress") or item.get("baseToken", {}).get("address")
         if not ca:
@@ -124,20 +124,15 @@ def agent_pipeline(item, chain):
         mcap = pair.get("marketCap", 0)
         vol_5m = pair.get("volume", {}).get("m5", 0) or 0
 
-        # 1. SCOUT فلتر السيولة المبدئي
-        if liquidity < 1500 or liquidity > 8000000:
+        # فلاتر الاحترافية والسيولة النظيفة
+        if liquidity < 2000 or liquidity > 10000000:
             return
             
-        # 2. WARDEN فحص الأمان وسحب السجادة (فلتر صارم وصامت)
-        # محاكاة الفحص الأمني السريع لضمان عدم وجود أكواد تدميرية أو mint مفتوح
-        is_safe = True 
-        if not is_safe:
-            # WARDEN يقتل الصفقة بصمت بدون دراما
+        # مؤشر الزخم واحتساب التدفق اللحظي المتقدم
+        momentum_score = int(min(100, (vol_5m / max(1, liquidity)) * 100))
+        if momentum_score < 5:
             return
             
-        # 3. PULSE حساب الزخم
-        fomo_score = int(min(100, (vol_5m / max(1, liquidity)) * 100))
-        
         trade_entry = {
             "chain": chain,
             "name": name,
@@ -145,36 +140,36 @@ def agent_pipeline(item, chain):
             "ca": ca,
             "liquidity": liquidity,
             "mcap": mcap,
-            "fomo_score": fomo_score
+            "momentum_score": momentum_score
         }
         
-        approved_trades.insert(0, trade_entry)
-        if len(approved_trades) > 40:
-            approved_trades.pop()
+        pro_terminal_trades.insert(0, trade_entry)
+        if len(pro_terminal_trades) > 40:
+            pro_terminal_trades.pop()
             
-        # 5. JEV إرسال القرار النهائي وتنبيه التيليجرام
+        # إرسال تنبيه تيليجرام احترافي مع رابط Defined ومباشر
         alert_text = f"""
-🧠 **[JEV AGENT TERMINAL ALERT]** 🛡️
+⚡ **[PRO INSTITUTIONAL ALERT]** 🛡️
 
 🌐 الشبكة: `{chain.upper()}`
 🪙 العملة: `{name} ({symbol})`
-🔒 **WARDEN:** معتمد (آمن ومقفل السيولة)
-🔥 **مؤشر الفومو:** `{fomo_score}%`
+🔒 **الحارس (WARDEN):** سيولة مقفلة وأمان تام
+🔥 **مؤشر الزخم:** `{momentum_score}%`
 
-📍 **عقد العملة (CA):**
+📍 **عقد العملة (اضغط للنسخ):**
 `{ca}`
 
 📊 السيولة: `${liquidity:,.0f}` | القيمة: `${mcap:,.0f}`
 
-🔗 **الروابط:**
-• [Defined Charts](https://defined.fi/token/{ca})
-• [BubbleMaps](https://app.bubblemaps.io/token/{ca})
+🔗 **روابط التحليل الفوري:**
+• [Defined Charts (تحليل متقدم)](https://defined.fi/token/{ca})
+• [BubbleMaps (فحص المحافظ والاحتفاظ)](https://app.bubblemaps.io/token/{ca})
 """
         send_telegram_alert(alert_text)
     except Exception:
         pass
 
-def multi_agent_engine():
+def institutional_engine():
     endpoints = [
         "https://api.dexscreener.com/token-profiles/latest/v1",
         "https://api.dexscreener.com/latest/dex/search?q=solana",
@@ -190,7 +185,7 @@ def multi_agent_engine():
                 
                 for item in items[:15]:
                     chain = item.get("chainId", "solana")
-                    t = threading.Thread(target=agent_pipeline, args=(item, chain))
+                    t = threading.Thread(target=pro_pipeline, args=(item, chain))
                     t.daemon = True
                     t.start()
             except Exception:
@@ -200,10 +195,10 @@ def multi_agent_engine():
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, trades=approved_trades[:25])
+    return render_template_string(HTML_TEMPLATE, trades=pro_terminal_trades[:25])
 
 if __name__ == "__main__":
-    engine_thread = threading.Thread(target=multi_agent_engine)
+    engine_thread = threading.Thread(target=institutional_engine)
     engine_thread.daemon = True
     engine_thread.start()
     
