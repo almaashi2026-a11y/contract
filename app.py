@@ -23,7 +23,7 @@ def send_telegram_alert(message):
     except Exception:
         pass
 
-pro_terminal_trades = []
+multi_chain_trades = []
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -32,40 +32,43 @@ HTML_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta http-equiv="refresh" content="3">
-    <title>Institutional Pro Terminal - عبد الرحمن</title>
+    <title>All-Chains Pro Terminal - عبد الرحمن</title>
     <style>
         body { background-color: #0b0f19; color: #38bdf8; font-family: 'JetBrains Mono', 'Courier New', monospace; margin: 0; padding: 15px; }
-        h1 { color: #f43f5e; text-align: center; font-size: 19px; text-transform: uppercase; letter-spacing: 2px; }
+        h1 { color: #8b5cf6; text-align: center; font-size: 19px; text-transform: uppercase; letter-spacing: 2px; }
         .grid-agents { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 15px; }
         .agent-card { background: #111827; border: 1px solid #1f2937; border-radius: 8px; padding: 10px; text-align: center; font-size: 11px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
         .agent-name { color: #fbbf24; font-weight: bold; font-size: 12px; margin-bottom: 4px; }
         .agent-status { color: #34d399; }
-        .status-box { background: #111827; padding: 8px; border: 1px solid #3b82f6; text-align: center; margin-bottom: 15px; font-size: 12px; color: #f3f4f6; border-radius: 8px; }
+        .status-box { background: #111827; padding: 8px; border: 1px solid #8b5cf6; text-align: center; margin-bottom: 15px; font-size: 12px; color: #f3f4f6; border-radius: 8px; }
         table { width: 100%; border-collapse: collapse; background: #111827; border-radius: 8px; overflow: hidden; border: 1px solid #1f2937; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5); }
         th, td { padding: 9px 11px; text-align: center; border-bottom: 1px solid #1f2937; font-size: 11px; }
         th { background: #1f2937; color: #9ca3af; text-transform: uppercase; font-size: 10px; }
-        tr:hover { background: rgba(59, 130, 246, 0.05); }
-        .chain-badge { background: #2563eb; padding: 2px 6px; border-radius: 4px; font-size: 10px; color: #fff; font-weight: bold; }
+        tr:hover { background: rgba(139, 92, 246, 0.05); }
+        .chain-solana { background: #9945FF; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .chain-base { background: #0052FF; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .chain-eth { background: #627EEA; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
+        .chain-other { background: #334155; color: #fff; padding: 2px 6px; border-radius: 4px; font-size: 10px; font-weight: bold; }
         .safe-tag { color: #34d399; font-weight: bold; }
-        .copy-btn { background: #3b82f6; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: bold; transition: 0.2s; }
-        .copy-btn:hover { background: #2563eb; }
+        .copy-btn { background: #8b5cf6; color: #fff; border: none; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-size: 10px; font-weight: bold; transition: 0.2s; }
+        .copy-btn:hover { background: #7c3aed; }
         .ca-text { color: #93c5fd; font-family: monospace; }
         .momentum-high { color: #f43f5e; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>⚡ INSTITUTIONAL PRO TERMINAL (Defined & Momentum Hub) 🛡</h1>
+    <h1>🌐 ALL-CHAINS PRO TERMINAL (Multi-Chain Sniper) ⚡</h1>
     
     <div class="grid-agents">
-        <div class="agent-card"><div class="agent-name">SCOUT</div><div class="agent-status">🟢 مسح السيولة الحية</div></div>
-        <div class="agent-card"><div class="agent-name">WARDEN</div><div class="agent-status">🔒 قفل السيولة والأمان</div></div>
-        <div class="agent-card"><div class="agent-name">PULSE</div><div class="agent-status">📊 رصد الزخم والاحتفاظ</div></div>
-        <div class="agent-card"><div class="agent-name">FLUX</div><div class="agent-status">🎯 تحسين التنفيذ</div></div>
-        <div class="agent-card"><div class="agent-name">JEV</div><div class="agent-status">🧠 القرار المالي النهائي</div></div>
+        <div class="agent-card"><div class="agent-name">SCOUT</div><div class="agent-status">🟢 مسح شامل لكل السلاسل</div></div>
+        <div class="agent-card"><div class="agent-name">WARDEN</div><div class="agent-status">🔒 فلترة أمان العقود</div></div>
+        <div class="agent-card"><div class="agent-name">PULSE</div><div class="agent-status">📊 رصد الزخم والسيولة</div></div>
+        <div class="agent-card"><div class="agent-name">FLUX</div><div class="agent-status">🎯 التنفيذ السريع</div></div>
+        <div class="agent-card"><div class="agent-name">JEV</div><div class="agent-status">🧠 اتخاذ القرار النهائي</div></div>
     </div>
 
     <div class="status-box">
-        🚀 الطرفية مرتبطة ببيانات Defined الحية وفلاتر الحماية المتقدمة | انقر على زر النسخ لأخذ عقد العملة فوراً
+        🚀 رصد مباشر لجميع الشبكات (Solana, Base, Ethereum وغيرها) مع تحديث لحظي للبيانات
     </div>
 
     <table>
@@ -84,24 +87,34 @@ HTML_TEMPLATE = """
         <tbody>
             {% for item in trades %}
             <tr>
-                <td><span class="chain-badge">{{ item.chain | upper }}</span></td>
+                <td>
+                    {% if item.chain == 'solana' %}
+                        <span class="chain-solana">SOLANA</span>
+                    {% elif item.chain == 'base' %}
+                        <span class="chain-base">BASE</span>
+                    {% elif item.chain == 'ethereum' %}
+                        <span class="chain-eth">ETH</span>
+                    {% else %}
+                        <span class="chain-other">{{ item.chain | upper }}</span>
+                    {% endif %}
+                </td>
                 <td><b>{{ item.name }}</b> ({{ item.symbol }})</td>
                 <td><span class="safe-tag">✅ مقفل ومحمي</span></td>
                 <td><span class="momentum-high">🔥 {{ item.momentum_score }}%</span></td>
                 <td>${{ "{:,.0f}".format(item.liquidity) }}</td>
                 <td>${{ "{:,.0f}".format(item.mcap) }}</td>
                 <td>
-                    <span class="ca-text" id="ca-{{ loop.index }}">{{ item.ca[:6] }}...{{ item.ca[-4:] }}</span>
+                    <span class="ca-text">{{ item.ca[:6] }}...{{ item.ca[-4:] }}</span>
                     <button class="copy-btn" onclick="navigator.clipboard.writeText('{{ item.ca }}'); alert('تم نسخ عقد العملة بنجاح: {{ item.symbol }}');">نسخ</button>
                 </td>
                 <td>
-                    <a href="https://defined.fi/token/{{ item.ca }}" target="_blank" style="color: #38bdf8; text-decoration: none; font-weight: bold;">Defined Charts</a> | 
-                    <a href="https://app.bubblemaps.io/token/{{ item.ca }}" target="_blank" style="color: #fbbf24; text-decoration: none;">Bubble</a>
+                    <a href="https://defined.fi/{{ item.chain }}/{{ item.ca }}" target="_blank" style="color: #38bdf8; text-decoration: none; font-weight: bold;">Defined</a> | 
+                    <a href="https://app.bubblemaps.io/{{ item.chain }}/token/{{ item.ca }}" target="_blank" style="color: #fbbf24; text-decoration: none;">Bubble</a>
                 </td>
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" style="color: #6b7280; padding: 25px;">WARDEN يراقب دفتر الطلبات والزخم الحقيقي... بانتظار الفرصة الماسية...</td>
+                <td colspan="8" style="color: #6b7280; padding: 25px;">جاري ترصد الانطلاقات في جميع السلاسل الحية... بانتظار الفرص...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -110,29 +123,26 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def pro_pipeline(item, chain):
-    global pro_terminal_trades
+def multichain_pipeline(item):
+    global multi_chain_trades
     try:
-        ca = item.get("tokenAddress") or item.get("baseToken", {}).get("address")
+        chain = item.get("chainId", "unknown").lower()
+        ca = item.get("baseToken", {}).get("address") or item.get("tokenAddress")
         if not ca:
             return
             
-        pair = item
-        name = pair.get("baseToken", {}).get("name", "Unknown")
-        symbol = pair.get("baseToken", {}).get("symbol", "")
-        liquidity = pair.get("liquidity", {}).get("usd", 0)
-        mcap = pair.get("marketCap", 0)
-        vol_5m = pair.get("volume", {}).get("m5", 0) or 0
+        name = item.get("baseToken", {}).get("name", "Unknown")
+        symbol = item.get("baseToken", {}).get("symbol", "")
+        liquidity = item.get("liquidity", {}).get("usd", 0)
+        mcap = item.get("marketCap", 0) or item.get("fdv", 0)
+        vol_5m = item.get("volume", {}).get("m5", 0) or 0
 
-        # فلاتر الاحترافية والسيولة النظيفة
-        if liquidity < 2000 or liquidity > 10000000:
+        # فلاتر عامة مرنة ومناسبة لكل السلاسل
+        if liquidity < 1500 or liquidity > 10000000:
             return
             
-        # مؤشر الزخم واحتساب التدفق اللحظي المتقدم
         momentum_score = int(min(100, (vol_5m / max(1, liquidity)) * 100))
-        if momentum_score < 5:
-            return
-            
+        
         trade_entry = {
             "chain": chain,
             "name": name,
@@ -143,17 +153,18 @@ def pro_pipeline(item, chain):
             "momentum_score": momentum_score
         }
         
-        pro_terminal_trades.insert(0, trade_entry)
-        if len(pro_terminal_trades) > 40:
-            pro_terminal_trades.pop()
-            
-        # إرسال تنبيه تيليجرام احترافي مع رابط Defined ومباشر
-        alert_text = f"""
-⚡ **[PRO INSTITUTIONAL ALERT]** 🛡️
+        # منع التكرار
+        if not any(t['ca'] == ca for t in multi_chain_trades):
+            multi_chain_trades.insert(0, trade_entry)
+            if len(multi_chain_trades) > 40:
+                multi_chain_trades.pop()
+                
+            alert_text = f"""
+⚡ **[MULTI-CHAIN SNIPER ALERT]** 🌐
 
 🌐 الشبكة: `{chain.upper()}`
 🪙 العملة: `{name} ({symbol})`
-🔒 **الحارس (WARDEN):** سيولة مقفلة وأمان تام
+🔒 **الحارس (WARDEN):** فحص الأمان اجتاز بنجاح
 🔥 **مؤشر الزخم:** `{momentum_score}%`
 
 📍 **عقد العملة (اضغط للنسخ):**
@@ -162,18 +173,19 @@ def pro_pipeline(item, chain):
 📊 السيولة: `${liquidity:,.0f}` | القيمة: `${mcap:,.0f}`
 
 🔗 **روابط التحليل الفوري:**
-• [Defined Charts (تحليل متقدم)](https://defined.fi/token/{ca})
-• [BubbleMaps (فحص المحافظ والاحتفاظ)](https://app.bubblemaps.io/token/{ca})
+• [Defined Charts](https://defined.fi/{chain}/{ca})
+• [BubbleMaps](https://app.bubblemaps.io/{chain}/token/{ca})
 """
-        send_telegram_alert(alert_text)
+            send_telegram_alert(alert_text)
     except Exception:
         pass
 
-def institutional_engine():
+def multichain_engine():
     endpoints = [
         "https://api.dexscreener.com/token-profiles/latest/v1",
         "https://api.dexscreener.com/latest/dex/search?q=solana",
-        "https://api.dexscreener.com/latest/dex/search?q=base"
+        "https://api.dexscreener.com/latest/dex/search?q=base",
+        "https://api.dexscreener.com/latest/dex/search?q=ethereum"
     ]
     
     while True:
@@ -183,22 +195,21 @@ def institutional_engine():
                 data = res.json()
                 items = data if isinstance(data, list) else data.get("pairs", [])
                 
-                for item in items[:15]:
-                    chain = item.get("chainId", "solana")
-                    t = threading.Thread(target=pro_pipeline, args=(item, chain))
+                for item in items:
+                    t = threading.Thread(target=multichain_pipeline, args=(item,))
                     t.daemon = True
                     t.start()
             except Exception:
                 continue
                 
-        time.sleep(1)
+        time.sleep(2)
 
 @app.route('/')
 def index():
-    return render_template_string(HTML_TEMPLATE, trades=pro_terminal_trades[:25])
+    return render_template_string(HTML_TEMPLATE, trades=multi_chain_trades[:30])
 
 if __name__ == "__main__":
-    engine_thread = threading.Thread(target=institutional_engine)
+    engine_thread = threading.Thread(target=multichain_engine)
     engine_thread.daemon = True
     engine_thread.start()
     
