@@ -24,7 +24,7 @@ def send_telegram_alert(message):
     except Exception as e:
         print(f"خطأ في إرسال التنبيه: {e}")
 
-# تخزين مؤقت للنتائج المرصودة لتعرض في لوحة الويب
+# تخزين مؤقت للنتائج المرصودة ذات السيولة القوية
 latest_scanned_tokens = []
 
 HTML_TEMPLATE = """
@@ -33,7 +33,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Chain Flow & Sniper Terminal - عبد الرحمن</title>
+    <title>High-Liquidity Institutional Terminal - عبد الرحمن</title>
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
         h1 { color: #58a6ff; text-align: center; font-size: 24px; margin-bottom: 20px; }
@@ -51,11 +51,11 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>⚡ Multi-Chain Tape Flow & Institutional Sniper Terminal ⚡</h1>
+    <h1>🐋 High-Liquidity Whale & Flow Terminal 🐋</h1>
     
     <div class="filter-box">
         <form method="GET" action="/">
-            <label>الحد الأدنى للسيولة ($):</label>
+            <label>الحد الأدنى للسيولة القوية ($):</label>
             <input type="number" name="min_liq" value="{{ min_liq }}">
             <button type="submit">تحديث الفلتر</button>
         </form>
@@ -64,11 +64,11 @@ HTML_TEMPLATE = """
     <table>
         <thead>
             <tr>
-                <th>الشبكة (Chain)</th>
-                <th>الرمز المميز (Token)</th>
+                <th>الشبكة</th>
+                <th>الرمز المميز</th>
                 <th>الحالة</th>
                 <th>القيمة السوقية (MCap)</th>
-                <th>السيولة ($)</th>
+                <th>السيولة القوية ($)</th>
                 <th>عقد العملة (CA)</th>
                 <th>روابط الفحص</th>
             </tr>
@@ -78,7 +78,7 @@ HTML_TEMPLATE = """
             <tr>
                 <td><span class="chain-tag">{{ item.chain | upper }}</span></td>
                 <td><b>{{ item.name }}</b> ({{ item.symbol }})</td>
-                <td class="buy">تدفق شرائي 🟢</td>
+                <td class="buy">سيولة مؤسسية 🟢</td>
                 <td>${{ "{:,.0f}".format(item.mcap) }}</td>
                 <td>${{ "{:,.0f}".format(item.liquidity) }}</td>
                 <td><span class="ca-link">{{ item.ca }}</span></td>
@@ -89,7 +89,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="color: #8b949e; padding: 20px;">جاري رصد التدفقات عبر جميع السلاسل...</td>
+                <td colspan="7" style="color: #8b949e; padding: 20px;">جاري رصد صفقات السيولة القوية عبر السلاسل...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -98,13 +98,13 @@ HTML_TEMPLATE = """
 </html>
 """
 
-def fast_multi_chain_scanner():
+def whale_flow_scanner():
     """
-    ماسح سريع لجميع السلاسل (Solana, Ethereum, BSC, etc.) عبر DexScreener
+    ماسح يركز على السيولة الضخمة والقوية حصراً مع إرسال تنبيهات تليجرام
     """
     global latest_scanned_tokens
-    # البحث الشامل لجلب أحدث الأصول المتداولة عبر المنصات
     queries = ["solana", "ethereum", "bsc", "base"]
+    sent_alerts = set() # لعدم تكرار إرسال نفس التنبيه
     
     while True:
         temp_list = []
@@ -126,8 +126,8 @@ def fast_multi_chain_scanner():
                     liquidity = pair.get("liquidity", {}).get("usd", 0)
                     mcap = pair.get("marketCap", 0)
                     
-                    # فلتر الأمان والسيولة
-                    if liquidity < 10000 or liquidity > 2000000:
+                    # 🐋 فلتر السيولة القوية حصراً (بين 100 ألف و 10 مليون دولار)
+                    if liquidity < 100000 or liquidity > 10000000:
                         continue
                         
                     token_data = {
@@ -140,51 +140,51 @@ def fast_multi_chain_scanner():
                     }
                     temp_list.append(token_data)
                     
-                    # إرسال تنبيه فوري لتليجرام لأول مرة يتم رصدها
-                    alert_msg = f"""
-⚡ **[MULTI-CHAIN SNIPER ALERT]** ⚡
+                    # إرسال تنبيه فوري لتليجرام إذا كانت الفرصة جديدة
+                    if ca not in sent_alerts:
+                        sent_alerts.add(ca)
+                        alert_msg = f"""
+🐋 **[HIGH LIQUIDITY WHALE ALERT]** 🐋
 
 🌐 **الشبكة:** `{chain.upper()}`
 🪙 **العملة:** `{token_data['name']} ({token_data['symbol']})`
 📍 **عقد العملة (CA):**
 `{ca}`
 
-📊 **البيانات اللحظية:**
+📊 **البيانات المالية القوية:**
 • القيمة السوقية: `${mcap:,.0f}`
-• السيولة: `${liquidity:,.0f}` 🟢
+• السيولة المتاحة: `${liquidity:,.0f}` 🟢
 
-🔗 **روابط الفحص:**
+🔗 **روابط الفحص والتحقق:**
 • [Defined Charts](https://defined.fi/token/{ca})
 • [BubbleMaps](https://app.bubblemaps.io/token/{ca})
 """
-                    send_telegram_alert(alert_msg)
-                    time.sleep(1) # منع الضغط على تيليجرام
-                    
+                        send_telegram_alert(alert_msg)
+                        time.sleep(1)
+                        
             except Exception as e:
-                print(f"Scanner error for {q}: {e}")
+                print(f"Scanner error: {e}")
                 
         if temp_list:
-            latest_scanned_tokens = temp_list[:50] # الاحتفاظ بآخر 50 فرصة
+            latest_scanned_tokens = temp_list[:50]
             
-        time.sleep(30) # فحص متواصل كل 30 ثانية
+        time.sleep(30)
 
 @app.route('/')
 def index():
-    min_liq = request.args.get('min_liq', '10000')
+    min_liq = request.args.get('min_liq', '100000')
     try:
         min_val = float(min_liq)
     except:
-        min_val = 10000.0
+        min_val = 100000.0
         
     filtered = [t for t in latest_scanned_tokens if t['liquidity'] >= min_val]
     return render_template_string(HTML_TEMPLATE, data=filtered, min_liq=min_liq)
 
 if __name__ == "__main__":
-    # تشغيل الماسح في خلفية مستقلة ليعمل بشكل دائم ويرسل التنبيهات
-    scanner_thread = threading.Thread(target=fast_multi_chain_scanner)
+    scanner_thread = threading.Thread(target=whale_flow_scanner)
     scanner_thread.daemon = True
     scanner_thread.start()
     
-    # تشغيل خادم الويب
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
