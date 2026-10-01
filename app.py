@@ -2,7 +2,11 @@ import os
 import time
 import json
 import requests
+import threading
+from flask import Flask, render_template_string
 from collections import defaultdict, OrderedDict
+
+app = Flask('')
 
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT = os.environ.get("TG_CHAT")
@@ -20,6 +24,7 @@ SEEN = OrderedDict()
 MAX_SEEN_SIZE = 15000
 
 wallets = defaultdict(lambda: {"n": 0, "vol": 0.0})
+system_status = "🔄 السكريبت بدأ العمل ويقوم بمسح أسواق Polymarket..."
 
 def add_to_seen(key):
     if key in SEEN:
@@ -53,6 +58,7 @@ def get(url, **params):
         return []
 
 def scan_arb():
+    global system_status
     markets = get(f"{GAMMA}/markets", active="true", closed="false", limit=500)
     if not isinstance(markets, list):
         return
@@ -87,6 +93,7 @@ def scan_arb():
                 f"⚠️ *ملاحظة:* تحقق من الرسوم وانزلاق السعر قبل التنفيذ."
             )
             tg(msg)
+            system_status = f"🎯 آخر فرصة رصدت: {m.get('question', 'N/A')} (ربح: {profit_pct:.1f}%)"
 
 def poll_trades():
     trades = get(f"{DATA}/trades", limit=500)
@@ -131,13 +138,39 @@ def poll_trades():
         except Exception:
             continue
 
-if __name__ == "__main__":
+def background_monitor():
     tg("✅ **Polymarket Pro Sentinel** يعمل الآن بأقصى كفاءة وثبات...")
     last_arb = 0
     while True:
-        poll_trades()
-        current_time = time.time()
-        if current_time - last_arb > 60:
-            scan_arb()
-            last_arb = current_time
+        try:
+            poll_trades()
+            current_time = time.time()
+            if current_time - last_arb > 60:
+                scan_arb()
+                last_arb = current_time
+        except Exception as e:
+            print("Monitor Loop Error:", e)
         time.sleep(10)
+
+@app.route('/')
+def index():
+    return f"""
+    <html>
+        <head><title>Polymarket Pro Sentinel - عبد الرحمن</title></head>
+        <body style="background: #0f172a; color: #38bdf8; font-family: monospace; text-align: center; padding-top: 50px;">
+            <h1>🚀 Polymarket Pro Sentinel is Running 24/7</h1>
+            <p>حالة النظام: {system_status}</p>
+            <p style="color: #34d399;">المتتبع يعمل في الخلفية ويرسل التنبيهات إلى تيليجرام بنجاح.</p>
+        </body>
+    </html>
+    """
+
+if __name__ == "__main__":
+    # تشغيل مراقب السوق في خيط منفصل (Background Thread)
+    t = threading.Thread(target=background_monitor)
+    t.daemon = True
+    t.start()
+    
+    # تشغيل سيرفر الويب لفتح المنفذ وإرضاء منصة Render
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
