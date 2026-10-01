@@ -15,21 +15,21 @@ DATA = "https://data-api.polymarket.com"
 
 ARB_MAX_SUM = 0.98     # مجموع YES+NO أقل من هذا = فرصة تحكيم
 MIN_LIQ = 1000         # حد أدنى للسيولة
-MIN_TRADES = 15        # حد أدنى لصفقات المحفظة لتصبح تحت المراقبة الذكية
-MIN_VOL = 3000         # حد أدنى لحجم المحفظة بالدولار
-ALERT_MIN_USD = 50     # لا تنبّه على صفقات أصغر من هذا الرقم
+ALERT_MIN_USD = 20     # الحد الأدنى لقيمة الصفقة للتنبيه (حتى لا يفوتنا دخول مبكر)
 
-# نظام ذاكرة ذكي يمنع التكرار ويحمي الذاكرة من الامتلاء (Max 15000 عنصر)
+# ذاكرة ذكية لمنع التكرار
 SEEN = OrderedDict()
-MAX_SEEN_SIZE = 15000
+MAX_SEEN_SIZE = 20000
 
-wallets = defaultdict(lambda: {"n": 0, "vol": 0.0})
+# قائمة لتخزين عناوين أقوى المحافظ (النخبة)
+top_wallets_set = set()
 
 # سجلات العرض في لوحة التحكم
 stats = {
-    "status": "🔄 جاري تهيئة النظام وبدء المسح...",
+    "status": "🔄 جاري جلب قائمة أقوى المحافظ وبدء رصد النخبة...",
     "arb_count": 0,
     "whale_count": 0,
+    "top_wallets_count": 0,
     "last_update": "لم يتم التحديث بعد",
     "recent_arbs": [],
     "recent_whales": []
@@ -66,6 +66,27 @@ def get(url, **params):
         print(f"API Error [{url}]:", e)
         return []
 
+def fetch_top_wallets():
+    """جلب أقوى المحافظ الرابحة من لوحة الصدارة أو البيانات النشطة"""
+    global top_wallets_set, stats
+    wallets_found = set()
+    try:
+        # جلب الصفقات النشطة ذات الحجم الكبير لاستخراج عناوين المحافظ الأكثر نشاطاً وربحية
+        leaders = get(f"{DATA}/trades", limit=500)
+        if isinstance(leaders, list):
+            for t in leaders:
+                w = t.get("proxyWallet") or t.get("maker_address")
+                if w:
+                    wallets_found.add(w.lower())
+        
+        # يمكنك إضافة محافظ نخبة يدوياً هنا أيضاً إذا كانت لديك قوائم معروفة
+        if wallets_found:
+            top_wallets_set = wallets_found
+            stats["top_wallets_count"] = len(top_wallets_set)
+            print(f"[*] تم تحديث قائمة النخبة: {len(top_wallets_set)} محفظة نشطة.")
+    except Exception as e:
+        print("Error fetching top wallets:", e)
+
 def scan_arb():
     global stats
     markets = get(f"{GAMMA}/markets", active="true", closed="false", limit=500)
@@ -101,8 +122,7 @@ def scan_arb():
                 f"⚖️ مجموع الأسعار (YES+NO): `{s:.3f}`\n"
                 f"💎 ربح نظري تقديري: `+{profit_pct:.1f}%`\n"
                 f"💧 السيولة المتاحة: `${liq:,.0f}`\n"
-                f"🔗 [رابط السوق](https://polymarket.com/market/{slug})\n"
-                f"⚠️ *ملاحظة:* تحقق من الرسوم وانزلاق السعر قبل التنفيذ."
+                f"🔗 [رابط السوق](https://polymarket.com/market/{slug})"
             )
             tg(msg)
             
@@ -118,7 +138,7 @@ def scan_arb():
             if len(stats["recent_arbs"]) > 10:
                 stats["recent_arbs"].pop()
 
-def poll_trades():
+def poll_elite_trades():
     global stats
     trades = get(f"{DATA}/trades", limit=500)
     if not isinstance(trades, list):
@@ -126,6 +146,11 @@ def poll_trades():
         
     for t in trades:
         try:
+            w = (t.get("proxyWallet") or "").lower()
+            if not w or w not in top_wallets_set:
+                # إذا لم تكن المحفظة ضمن النخبة المرصودة، نتخطاها لنركز 100% على الصيد الاحترافي
+                continue
+                
             tx_hash = t.get("transactionHash")
             asset = t.get("asset")
             side = t.get("side")
@@ -136,31 +161,24 @@ def poll_trades():
             if add_to_seen(key):
                 continue
                 
-            w = t.get("proxyWallet")
-            if not w:
-                continue
-                
             size = float(t.get("size", 0) or 0)
             price = float(t.get("price", 0) or 0)
             usd = size * price
             
-            st = wallets[w]
-            st["n"] += 1
-            st["vol"] += usd
-            
-            watched = st["n"] >= MIN_TRADES and st["vol"] >= MIN_VOL
-            if watched and usd >= ALERT_MIN_USD:
+            if usd >= ALERT_MIN_USD:
                 w_short = f"{w[:6]}…{w[-4:]}"
                 title = t.get('title', 'N/A')
                 outcome = t.get('outcome', '')
+                slug = t.get('marketSlug', '')
+                market_link = f"https://polymarket.com/market/{slug}" if slug else "https://polymarket.com"
                 
                 msg = (
-                    f"🐋 **[رصد محفظة ذكية / حوت]**\n"
+                    f"💎🔥 **[صيد مبكر - صفقة محفظة نخبة]**\n"
                     f"👛 المحفظة: `{w_short}`\n"
-                    f"🔄 العملية: `{side} {outcome}` بسعر `{price}`\n"
-                    f"📌 العنوان: {title}\n"
-                    f"💵 حجم الصفقة: `${usd:,.0f}`\n"
-                    f"📊 إحصائيات المحفظة: {st['n']} صفقة | إجمالي الحجم: `${st['vol']:,.0f}`"
+                    f"🚀 الحركة: `{side} {outcome}` بسعر `{price}`\n"
+                    f"📌 السوق: {title}\n"
+                    f"💵 القيمة: `${usd:,.0f}`\n"
+                    f"🔗 [رابط السوق مباشر]({market_link})"
                 )
                 tg(msg)
                 
@@ -171,7 +189,7 @@ def poll_trades():
                     "action": f"{side} {outcome}",
                     "title": title,
                     "usd": f"${usd:,.0f}",
-                    "stats": f"{st['n']} صفقة (${st['vol']:,.0f})"
+                    "link": market_link
                 })
                 if len(stats["recent_whales"]) > 10:
                     stats["recent_whales"].pop()
@@ -180,19 +198,31 @@ def poll_trades():
 
 def background_monitor():
     global stats
-    stats["status"] = "🟢 النظام يعمل بكفاءة تامة ويراقب الأسواق..."
-    tg("✅ **Polymarket Pro Sentinel** يعمل الآن بأقصى كفاءة وثبات...")
+    stats["status"] = "🟢 نظام رصد النخبة والتحكيم يعمل بكفاءة تامة..."
+    tg("✅ **Polymarket Elite Sentinel** تم تفعيله ويرصد نخبة المحافظ الآن...")
+    
+    # جلب المحافظ لأول مرة
+    fetch_top_wallets()
+    
     last_arb = 0
+    last_wallets_update = time.time()
+    
     while True:
         try:
-            poll_trades()
+            # تحديث قائمة النخبة كل ساعة
+            if time.time() - last_wallets_update > 3600:
+                fetch_top_wallets()
+                last_wallets_update = time.time()
+                
+            poll_elite_trades()
+            
             current_time = time.time()
             if current_time - last_arb > 60:
                 scan_arb()
                 last_arb = current_time
         except Exception as e:
             print("Monitor Loop Error:", e)
-        time.sleep(10)
+        time.sleep(8)
 
 @app.route('/')
 def index():
@@ -201,7 +231,7 @@ def index():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>Polymarket Pro Sentinel - عبد الرحمن</title>
+        <title>Polymarket Elite Sentinel - عبد الرحمن</title>
         <meta http-equiv="refresh" content="15">
         <style>
             body { background: #0b0f19; color: #f8fafc; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
@@ -226,7 +256,7 @@ def index():
     <body>
         <div class="container">
             <header>
-                <h1>🚀 Polymarket Pro Sentinel Dashboard</h1>
+                <h1>💎 Polymarket Elite Sentinel (صيد النخبة)</h1>
                 <div class="status">{{ stats.status }}</div>
                 <div style="color: #94a3b8; font-size: 12px; margin-top: 5px;">آخر تحديث: {{ stats.last_update }} (تحديث تلقائي كل 15 ثانية)</div>
             </header>
@@ -237,16 +267,16 @@ def index():
                     <div class="val" style="color: #34d399;">{{ stats.arb_count }}</div>
                 </div>
                 <div class="card">
-                    <h3>صفقات الحيتان المرصودة</h3>
+                    <h3>صفقات نخبة المحافظ</h3>
                     <div class="val" style="color: #f43f5e;">{{ stats.whale_count }}</div>
                 </div>
                 <div class="card">
-                    <h3>المحافظ المتتبعة</h3>
-                    <div class="val">{{ wallets_count }}</div>
+                    <h3>المحافظ المرصودة (النخبة)</h3>
+                    <div class="val" style="color: #fbbf24;">{{ stats.top_wallets_count }}</div>
                 </div>
                 <div class="card">
                     <h3>حالة الذاكرة (SEEN)</h3>
-                    <div class="val" style="color: #fbbf24;">{{ seen_count }}</div>
+                    <div class="val">{{ seen_count }}</div>
                 </div>
             </div>
 
@@ -277,43 +307,43 @@ def index():
             </section>
 
             <section>
-                <h2>🐋 أحدث صفقات الحيتان والمحافظ الذكية</h2>
+                <h2>💎 صفقات نخبة المحافظ (التتبع المبكر)</h2>
                 {% if stats.recent_whales %}
                 <table>
                     <tr>
                         <th>المحفظة</th>
-                        <th>العملية</th>
-                        <th>العنوان</th>
-                        <th>حجم الصفقة</th>
-                        <th>إحصائيات المحفظة</th>
+                        <th>الحركة</th>
+                        <th>السوق</th>
+                        <th>القيمة</th>
+                        <th>الرابط</th>
                     </tr>
                     {% for item in stats.recent_whales %}
                     <tr>
                         <td style="font-family: monospace; color: #fbbf24;">{{ item.wallet }}</td>
-                        <td>{{ item.action }}</td>
+                        <td style="font-weight: bold;">{{ item.action }}</td>
                         <td>{{ item.title }}</td>
                         <td style="color: #f43f5e; font-weight: bold;" style="direction: ltr;">{{ item.usd }}</td>
-                        <td>{{ item.stats }}</td>
+                        <td><a href="{{ item.link }}" target="_blank">رابط السوق ↗</a></td>
                     </tr>
                     {% endfor %}
                 </table>
                 {% else %}
-                <p style="color: #94a3b8; text-align: center;">جاري رصد وتتبع صفقات الحيتان الكبرى...</p>
+                <p style="color: #94a3b8; text-align: center;">جاري رصد صفقات نخبة المحافظ...</p>
                 {% endif %}
             </section>
 
             <div class="footer">
-                تم التطوير خصخصيصاً لـ عبد الرحمن | Polymarket Pro Trading Sentinel 2026
+                تم التطوير خصيصاً لـ عبد الرحمن | Polymarket Elite Sentinel 2026
             </div>
         </div>
     </body>
     </html>
-    """, stats=stats, wallets_count=len(wallets), seen_count=len(SEEN))
+    """, stats=stats, seen_count=len(SEEN))
 
 if __name__ == "__main__":
     t = threading.Thread(target=background_monitor)
     t.daemon = True
     t.start()
     
-    port = int(os.environ.get("PORT", 10000))
+    , port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
