@@ -1,94 +1,143 @@
-import os, time, json, requests
-from collections import defaultdict
+import os
+import time
+import json
+import requests
+from collections import defaultdict, OrderedDict
 
-TG_TOKEN = os.environ["TG_TOKEN"]   # من Environment في Render، لا تكتبه بالكود
-TG_CHAT = os.environ["TG_CHAT"]
+TG_TOKEN = os.environ.get("TG_TOKEN")
+TG_CHAT = os.environ.get("TG_CHAT")
 GAMMA = "https://gamma-api.polymarket.com"
 DATA = "https://data-api.polymarket.com"
 
-ARB_MAX_SUM = 0.98     # مجموع YES+NO أقل من هذا = فرصة
+ARB_MAX_SUM = 0.98     # مجموع YES+NO أقل من هذا = فرصة تحكيم
 MIN_LIQ = 1000         # حد أدنى للسيولة
-MIN_TRADES = 20        # حد أدنى لصفقات المحفظة لتدخل المراقبة
-MIN_VOL = 5000         # حد أدنى لحجم المحفظة بالدولار
-ALERT_MIN_USD = 50     # لا تنبّه على صفقات أصغر
+MIN_TRADES = 15        # حد أدنى لصفقات المحفظة لتصبح تحت المراقبة الذكية
+MIN_VOL = 3000         # حد أدنى لحجم المحفظة بالدولار
+ALERT_MIN_USD = 50     # لا تنبّه على صفقات أصغر من هذا الرقم
 
-SEEN = set()
+# نظام ذاكرة ذكي يمنع التكرار ويحمي الذاكرة من الامتلاء (Max 15000 عنصر)
+SEEN = OrderedDict()
+MAX_SEEN_SIZE = 15000
+
 wallets = defaultdict(lambda: {"n": 0, "vol": 0.0})
 
+def add_to_seen(key):
+    if key in SEEN:
+        SEEN.move_to_end(key)
+        return True
+    SEEN[key] = True
+    if len(SEEN) > MAX_SEEN_SIZE:
+        SEEN.popitem(last=False)
+    return False
 
 def tg(msg):
+    if not TG_TOKEN or not TG_CHAT:
+        return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": msg,
-                  "disable_web_page_preview": True},
-            timeout=10)
+            json={"chat_id": TG_CHAT, "text": msg, "disable_web_page_preview": True},
+            timeout=10
+        )
     except Exception as e:
-        print("tg err", e)
-
+        print("Telegram Error:", e)
 
 def get(url, **params):
     try:
         r = requests.get(url, params=params, timeout=15)
         r.raise_for_status()
-        return r.json()
+        data = r.json()
+        return data if isinstance(data, (list, dict)) else []
     except Exception as e:
-        print("api err", url, e)
+        print(f"API Error [{url}]:", e)
         return []
-
 
 def scan_arb():
     markets = get(f"{GAMMA}/markets", active="true", closed="false", limit=500)
+    if not isinstance(markets, list):
+        return
+        
     for m in markets:
         try:
-            prices = [float(x) for x in json.loads(m["outcomePrices"])]
+            prices_raw = m.get("outcomePrices")
+            if not prices_raw:
+                continue
+            prices = [float(x) for x in json.loads(prices_raw)]
             liq = float(m.get("liquidityNum") or 0)
         except Exception:
             continue
+            
         if len(prices) != 2 or liq < MIN_LIQ:
             continue
+            
         s = sum(prices)
         if s < ARB_MAX_SUM:
-            key = ("arb", m["id"], round(s, 2))
-            if key in SEEN:
+            key = ("arb", m.get("id"), round(s, 2))
+            if add_to_seen(key):
                 continue
-            SEEN.add(key)
-            tg(f"🎯 فرصة تحكيم محتملة\n{m.get('question')}\n"
-               f"YES+NO = {s:.3f} (ربح نظري {(1 - s) * 100:.1f}%)\n"
-               f"السيولة: ${liq:,.0f}\n"
-               f"https://polymarket.com/market/{m.get('slug')}\n"
-               f"⚠️ تأكد من الرسوم والـ spread قبل أي دخول")
-
+                
+            profit_pct = (1 - s) * 100
+            msg = (
+                f"🎯 **[فرصة تحكيم مؤسسية - ARB]**\n"
+                f"📌 السوق: {m.get('question', 'N/A')}\n"
+                f"⚖️ مجموع الأسعار (YES+NO): `{s:.3f}`\n"
+                f"💎 ربح نظري تقديري: `+{profit_pct:.1f}%`\n"
+                f"💧 السيولة المتاحة: `${liq:,.0f}`\n"
+                f"🔗 [رابط السوق على Polymarket](https://polymarket.com/market/{m.get('slug', '')})\n"
+                f"⚠️ *ملاحظة:* تحقق من الرسوم وانزلاق السعر قبل التنفيذ."
+            )
+            tg(msg)
 
 def poll_trades():
-    for t in get(f"{DATA}/trades", limit=500):
-        key = (t.get("transactionHash"), t.get("asset"), t.get("side"))
-        if key in SEEN:
+    trades = get(f"{DATA}/trades", limit=500)
+    if not isinstance(trades, list):
+        return
+        
+    for t in trades:
+        try:
+            tx_hash = t.get("transactionHash")
+            asset = t.get("asset")
+            side = t.get("side")
+            if not tx_hash or not asset:
+                continue
+                
+            key = (tx_hash, asset, side)
+            if add_to_seen(key):
+                continue
+                
+            w = t.get("proxyWallet")
+            if not w:
+                continue
+                
+            size = float(t.get("size", 0) or 0)
+            price = float(t.get("price", 0) or 0)
+            usd = size * price
+            
+            st = wallets[w]
+            st["n"] += 1
+            st["vol"] += usd
+            
+            watched = st["n"] >= MIN_TRADES and st["vol"] >= MIN_VOL
+            if watched and usd >= ALERT_MIN_USD:
+                msg = (
+                    f"🐋 **[رصد محفظة ذكية / حوت]**\n"
+                    f"👛 المحفظة: `{w[:6]}…{w[-4:]}`\n"
+                    f"🔄 العملية: `{side} {t.get('outcome', '')}` بسعر `{price}`\n"
+                    f"📌 العنوان: {t.get('title', 'N/A')}\n"
+                    f"💵 حجم الصفقة: `${usd:,.0f}`\n"
+                    f"📊 إحصائيات المحفظة: {st['n']} صفقة | إجمالي الحجم: `${st['vol']:,.0f}`"
+                )
+                tg(msg)
+        except Exception:
             continue
-        SEEN.add(key)
-        w = t.get("proxyWallet")
-        if not w:
-            continue
-        usd = float(t.get("size", 0)) * float(t.get("price", 0))
-        st = wallets[w]
-        st["n"] += 1
-        st["vol"] += usd
-        watched = st["n"] >= MIN_TRADES and st["vol"] >= MIN_VOL
-        if watched and usd >= ALERT_MIN_USD:
-            tg(f"👛 {w[:6]}…{w[-4:]}\n"
-               f"{t.get('side')} {t.get('outcome')} @ {t.get('price')}\n"
-               f"{t.get('title')}\n"
-               f"الحجم: ${usd:,.0f} | صفقات: {st['n']} | حجم كلي: ${st['vol']:,.0f}")
-    if len(SEEN) > 100000:
-        SEEN.clear()
-
 
 if __name__ == "__main__":
-    tg("✅ Polymarket monitor شغّال")
+    tg("✅ **Polymarket Pro Sentinel** يعمل الآن بأقصى كفاءة وثبات...")
     last_arb = 0
     while True:
         poll_trades()
-        if time.time() - last_arb > 60:
+        current_time = time.time()
+        if current_time - last_arb > 60:
             scan_arb()
-            last_arb = time.time()
+            last_arb = current_time
         time.sleep(10)
