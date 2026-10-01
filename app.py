@@ -15,7 +15,7 @@ DATA = "https://data-api.polymarket.com"
 
 ARB_MAX_SUM = 0.98     # مجموع YES+NO أقل من هذا = فرصة تحكيم
 MIN_LIQ = 1000         # حد أدنى للسيولة
-ALERT_MIN_USD = 20     # الحد الأدنى لقيمة الصفقة للتنبيه (حتى لا يفوتنا دخول مبكر)
+ALERT_MIN_USD = 20     # الحد الأدنى لقيمة الصفقة للتنبيه
 
 # ذاكرة ذكية لمنع التكرار
 SEEN = OrderedDict()
@@ -67,11 +67,9 @@ def get(url, **params):
         return []
 
 def fetch_top_wallets():
-    """جلب أقوى المحافظ الرابحة من لوحة الصدارة أو البيانات النشطة"""
     global top_wallets_set, stats
     wallets_found = set()
     try:
-        # جلب الصفقات النشطة ذات الحجم الكبير لاستخراج عناوين المحافظ الأكثر نشاطاً وربحية
         leaders = get(f"{DATA}/trades", limit=500)
         if isinstance(leaders, list):
             for t in leaders:
@@ -79,7 +77,6 @@ def fetch_top_wallets():
                 if w:
                     wallets_found.add(w.lower())
         
-        # يمكنك إضافة محافظ نخبة يدوياً هنا أيضاً إذا كانت لديك قوائم معروفة
         if wallets_found:
             top_wallets_set = wallets_found
             stats["top_wallets_count"] = len(top_wallets_set)
@@ -148,7 +145,6 @@ def poll_elite_trades():
         try:
             w = (t.get("proxyWallet") or "").lower()
             if not w or w not in top_wallets_set:
-                # إذا لم تكن المحفظة ضمن النخبة المرصودة، نتخطاها لنركز 100% على الصيد الاحترافي
                 continue
                 
             tx_hash = t.get("transactionHash")
@@ -201,7 +197,6 @@ def background_monitor():
     stats["status"] = "🟢 نظام رصد النخبة والتحكيم يعمل بكفاءة تامة..."
     tg("✅ **Polymarket Elite Sentinel** تم تفعيله ويرصد نخبة المحافظ الآن...")
     
-    # جلب المحافظ لأول مرة
     fetch_top_wallets()
     
     last_arb = 0
@@ -209,7 +204,6 @@ def background_monitor():
     
     while True:
         try:
-            # تحديث قائمة النخبة كل ساعة
             if time.time() - last_wallets_update > 3600:
                 fetch_top_wallets()
                 last_wallets_update = time.time()
@@ -345,5 +339,5 @@ if __name__ == "__main__":
     t.daemon = True
     t.start()
     
-    , port = int(os.environ.get("PORT", 10000))
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
