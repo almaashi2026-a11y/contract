@@ -10,29 +10,26 @@ app = Flask('')
 
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT = os.environ.get("TG_CHAT")
-GAMMA = "https://gamma-api.polymarket.com"
-DATA = "https://data-api.polymarket.com"
 
-ARB_MAX_SUM = 0.98     # مجموع YES+NO أقل من هذا = فرصة تحكيم
-MIN_LIQ = 1000         # حد أدنى للسيولة
-ALERT_MIN_USD = 20     # الحد الأدنى لقيمة الصفقة للتنبيه
+# مصادر رصد عملات الميم والسيولة (مثل DexScreener / Pump / APIs المخصصة)
+DEX_API = "https://api.dexscreener.com/latest/dex/tokens/"
+TRENDING_DEX = "https://api.dexscreener.com/latest/dex/trending/tokens"
 
-# ذاكرة ذكية لمنع التكرار
+MIN_LIQ_MEME = 5000    # حد أدنى للسيولة القوية لعملات الميم ($)
+MIN_VOL_MEME = 10000   # حد أدنى لحجم التداول القوي ($)
+ALERT_MIN_USD = 50     # الحد الأدنى لقيمة الصفقة المرصودة
+
+# ذاكرة ذكية لمنع تكرار التنبيهات
 SEEN = OrderedDict()
 MAX_SEEN_SIZE = 20000
 
-# قائمة لتخزين عناوين أقوى المحافظ (النخبة)
-top_wallets_set = set()
-
-# سجلات العرض في لوحة التحكم
+# سجلات العرض في لوحة التحكم الخاصة بعملات الميم
 stats = {
-    "status": "🔄 جاري جلب قائمة أقوى المحافظ وبدء رصد النخبة...",
-    "arb_count": 0,
-    "whale_count": 0,
-    "top_wallets_count": 0,
+    "status": "🟢 نظام صيد ومراقبة عملات الميم وحيتانها يعمل بنجاح...",
+    "meme_count": 0,
+    "whale_alerts": 0,
     "last_update": "لم يتم التحديث بعد",
-    "recent_arbs": [],
-    "recent_whales": []
+    "recent_memes": []
 }
 
 def add_to_seen(key):
@@ -56,172 +53,85 @@ def tg(msg):
     except Exception as e:
         print("Telegram Error:", e)
 
-def get(url, **params):
+def get(url):
     try:
-        r = requests.get(url, params=params, timeout=15)
+        r = requests.get(url, timeout=15)
         r.raise_for_status()
-        data = r.json()
-        return data if isinstance(data, (list, dict)) else []
+        return r.json()
     except Exception as e:
         print(f"API Error [{url}]:", e)
-        return []
+        return {}
 
-def fetch_top_wallets():
-    global top_wallets_set, stats
-    wallets_found = set()
-    try:
-        leaders = get(f"{DATA}/trades", limit=500)
-        if isinstance(leaders, list):
-            for t in leaders:
-                w = t.get("proxyWallet") or t.get("maker_address")
-                if w:
-                    wallets_found.add(w.lower())
-        
-        if wallets_found:
-            top_wallets_set = wallets_found
-            stats["top_wallets_count"] = len(top_wallets_set)
-            print(f"[*] تم تحديث قائمة النخبة: {len(top_wallets_set)} محفظة نشطة.")
-    except Exception as e:
-        print("Error fetching top wallets:", e)
-
-def scan_arb():
+def scan_memecoins():
     global stats
-    markets = get(f"{GAMMA}/markets", active="true", closed="false", limit=500)
-    if not isinstance(markets, list):
+    data = get(TRENDING_DEX)
+    pairs = data.get("pairs", [])
+    if not isinstance(pairs, list):
         return
-        
-    for m in markets:
+
+    for p in pairs:
         try:
-            prices_raw = m.get("outcomePrices")
-            if not prices_raw:
+            # التركيز على شبكات الميم الكبرى مثل Solana, Base, Ethereum
+            chain = p.get("chainId", "")
+            if chain not in ["solana", "base", "ethereum"]:
                 continue
-            prices = [float(x) for x in json.loads(prices_raw)]
-            liq = float(m.get("liquidityNum") or 0)
-        except Exception:
-            continue
+                
+            liq = float(p.get("liquidity", {}).get("usd", 0) or 0)
+            vol = float(p.get("volume", {}).get("h24", 0) or 0)
             
-        if len(prices) != 2 or liq < MIN_LIQ:
-            continue
+            if liq < MIN_LIQ_MEME or vol < MIN_VOL_MEME:
+                continue
+                
+            token_addr = p.get("baseToken", {}).get("address", "")
+            symbol = p.get("baseToken", {}).get("symbol", "UNKNOWN")
+            name = p.get("baseToken", {}).get("name", "Unknown Meme")
+            price_change = float(p.get("priceChange", {}).get("h1", 0) or 0)
             
-        s = sum(prices)
-        if s < ARB_MAX_SUM:
-            key = ("arb", m.get("id"), round(s, 2))
+            if price_change <= 3.0: # نبحث عن العملات التي تبدأ بالانفجار والزخم (أكثر من 3% في ساعة)
+                continue
+                
+            key = ("meme_pump", token_addr, round(price_change, 1))
             if add_to_seen(key):
                 continue
                 
-            profit_pct = (1 - s) * 100
-            q_text = m.get('question', 'N/A')
-            slug = m.get('slug', '')
+            dex_url = p.get("url", "https://dexscreener.com")
             
             msg = (
-                f"🎯 **[فرصة تحكيم مؤسسية - ARB]**\n"
-                f"🪙 **العملة / الحدث:** {q_text}\n"
-                f"⚖️ مجموع الأسعار (YES+NO): `{s:.3f}`\n"
-                f"💎 ربح نظري تقديري: `+{profit_pct:.1f}%`\n"
+                f"🐸🚀 **[انفجار عملة ميم جديدة - MEME ALERT]**\n"
+                f"🪙 **العملة:** `{symbol}` ({name})\n"
+                f"🌐 **الشبكة:** `{chain.upper()}`\n"
+                f"🔥 **زخم (ساعة):** `+{price_change}%`\n"
                 f"💧 **السيولة القوية:** `${liq:,.0f}`\n"
-                f"🔗 [رابط السوق](https://polymarket.com/market/{slug})"
+                f"📊 **حجم التداول:** `${vol:,.0f}`\n"
+                f"🔗 [رابط DexScreener]({dex_url})"
             )
             tg(msg)
             
-            stats["arb_count"] += 1
+            stats["meme_count"] += 1
             stats["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            stats["recent_arbs"].insert(0, {
-                "question": q_text,
-                "sum": f"{s:.3f}",
-                "profit": f"+{profit_pct:.1f}%",
+            stats["recent_memes"].insert(0, {
+                "symbol": symbol,
+                "name": name,
+                "chain": chain.upper(),
+                "change": f"+{price_change}%",
                 "liq": f"${liq:,.0f}",
-                "link": f"https://polymarket.com/market/{slug}"
+                "vol": f"${vol:,.0f}",
+                "link": dex_url
             })
-            if len(stats["recent_arbs"]) > 10:
-                stats["recent_arbs"].pop()
-
-def poll_elite_trades():
-    global stats
-    trades = get(f"{DATA}/trades", limit=500)
-    if not isinstance(trades, list):
-        return
-        
-    for t in trades:
-        try:
-            w = (t.get("proxyWallet") or "").lower()
-            if not w or w not in top_wallets_set:
-                continue
-                
-            tx_hash = t.get("transactionHash")
-            asset = t.get("asset")
-            side = t.get("side")
-            if not tx_hash or not asset:
-                continue
-                
-            key = (tx_hash, asset, side)
-            if add_to_seen(key):
-                continue
-                
-            size = float(t.get("size", 0) or 0)
-            price = float(t.get("price", 0) or 0)
-            usd = size * price
-            
-            if usd >= ALERT_MIN_USD:
-                w_short = f"{w[:6]}…{w[-4:]}"
-                title = t.get('title', 'N/A')
-                outcome = t.get('outcome', '')
-                slug = t.get('marketSlug', '')
-                market_link = f"https://polymarket.com/market/{slug}" if slug else "https://polymarket.com"
-                
-                market_liq = float(t.get('liquidity', 0) or 0)
-                liq_text = f"${market_liq:,.0f}" if market_liq > 0 else "قوية (نشطة)"
-                
-                msg = (
-                    f"💎🔥 **[صيد مبكر - صفقة محفظة نخبة]**\n"
-                    f"🪙 **العملة / الحدث:** {title}\n"
-                    f"👛 المحفظة: `{w_short}`\n"
-                    f"🚀 الحركة: `{side} {outcome}` بسعر `{price}`\n"
-                    f"💵 قيمة الصفقة: `${usd:,.0f}`\n"
-                    f"💧 **السيولة القوية:** `{liq_text}`\n"
-                    f"🔗 [رابط السوق مباشر]({market_link})"
-                )
-                tg(msg)
-                
-                stats["whale_count"] += 1
-                stats["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
-                stats["recent_whales"].insert(0, {
-                    "wallet": w_short,
-                    "action": f"{side} {outcome}",
-                    "title": title,
-                    "usd": f"${usd:,.0f}",
-                    "liq": liq_text,
-                    "link": market_link
-                })
-                if len(stats["recent_whales"]) > 10:
-                    stats["recent_whales"].pop()
+            if len(stats["recent_memes"]) > 15:
+                stats["recent_memes"].pop()
         except Exception:
             continue
 
 def background_monitor():
     global stats
-    stats["status"] = "🟢 نظام رصد النخبة والتحكيم يعمل بكفاءة تامة..."
-    tg("✅ **Polymarket Elite Sentinel** تم تفعيله ويرصد النخبة والسيولة الآن...")
-    
-    fetch_top_wallets()
-    
-    last_arb = 0
-    last_wallets_update = time.time()
-    
+    tg("✅ **Meme Sniper Bot** تم تفعيل نظام رصد عملات الميم والسيولة بنجاح...")
     while True:
         try:
-            if time.time() - last_wallets_update > 3600:
-                fetch_top_wallets()
-                last_wallets_update = time.time()
-                
-            poll_elite_trades()
-            
-            current_time = time.time()
-            if current_time - last_arb > 60:
-                scan_arb()
-                last_arb = current_time
+            scan_memecoins()
         except Exception as e:
             print("Monitor Loop Error:", e)
-        time.sleep(8)
+        time.sleep(30) # فحص دوري كل 30 ثانية لعملات الميم
 
 @app.route('/')
 def index():
@@ -230,24 +140,24 @@ def index():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>Polymarket Elite Sentinel - عبد الرحمن</title>
+        <title>Meme Sniper Dashboard - عبد الرحمن</title>
         <meta http-equiv="refresh" content="15">
         <style>
             body { background: #0b0f19; color: #f8fafc; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
             .container { max-width: 1100px; margin: auto; }
             header { text-align: center; padding: 20px; background: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; }
-            h1 { color: #38bdf8; margin: 0 0 10px 0; font-size: 24px; }
+            h1 { color: #f43f5e; margin: 0 0 10px 0; font-size: 24px; }
             .status { color: #34d399; font-weight: bold; font-size: 14px; }
-            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 15px; margin-bottom: 25px; }
+            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-bottom: 25px; }
             .card { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; text-align: center; }
             .card h3 { margin: 0 0 10px 0; color: #94a3b8; font-size: 14px; }
             .card .val { font-size: 24px; font-weight: bold; color: #38bdf8; }
             section { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; margin-bottom: 20px; }
-            h2 { color: #38bdf8; font-size: 18px; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-top: 0; }
+            h2 { color: #f43f5e; font-size: 18px; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-top: 0; }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
             th, td { padding: 10px; text-align: right; border-bottom: 1px solid #334155; }
             th { color: #94a3b8; }
-            .market-title { direction: ltr; text-align: right; unicode-bidi: plaintext; font-weight: bold; color: #f8fafc; }
+            .token-name { direction: ltr; text-align: right; unicode-bidi: plaintext; font-weight: bold; color: #f8fafc; }
             a { color: #38bdf8; text-decoration: none; }
             a:hover { text-decoration: underline; }
             .footer { text-align: center; color: #64748b; font-size: 12px; margin-top: 30px; }
@@ -256,86 +166,52 @@ def index():
     <body>
         <div class="container">
             <header>
-                <h1>💎 Polymarket Elite Sentinel (صيد النخبة والسيولة)</h1>
+                <h1>🐸🔥 Meme Sniper Sentinel (رصد انفجارات عملات الميم)</h1>
                 <div class="status">{{ stats.status }}</div>
                 <div style="color: #94a3b8; font-size: 12px; margin-top: 5px;">آخر تحديث: {{ stats.last_update }} (تحديث تلقائي كل 15 ثانية)</div>
             </header>
 
             <div class="grid">
                 <div class="card">
-                    <h3>فرص التحكيم المكتشفة</h3>
-                    <div class="val" style="color: #34d399;">{{ stats.arb_count }}</div>
-                </div>
-                <div class="card">
-                    <h3>صفقات نخبة المحافظ</h3>
-                    <div class="val" style="color: #f43f5e;">{{ stats.whale_count }}</div>
-                </div>
-                <div class="card">
-                    <h3>المحافظ المرصودة (النخبة)</h3>
-                    <div class="val" style="color: #fbbf24;">{{ stats.top_wallets_count }}</div>
+                    <h3>فرص الميم المرصودة</h3>
+                    <div class="val" style="color: #34d399;">{{ stats.meme_count }}</div>
                 </div>
                 <div class="card">
                     <h3>حالة الذاكرة (SEEN)</h3>
-                    <div class="val">{{ seen_count }}</div>
+                    <div class="val" style="color: #fbbf24;">{{ seen_count }}</div>
                 </div>
             </div>
 
             <section>
-                <h2>🎯 أحدث فرص التحكيم (Arbitrage)</h2>
-                {% if stats.recent_arbs %}
+                <h2>🚀 أحدث عملات الميم المكتشفة بالسيولة القوية</h2>
+                {% if stats.recent_memes %}
                 <table>
                     <tr>
-                        <th>اسم العملة / الحدث</th>
-                        <th>المجموع</th>
-                        <th>الربح التقديري</th>
+                        <th>العملة / الرمز</th>
+                        <th>الشبكة</th>
+                        <th>الزخم (ساعة)</th>
                         <th>السيولة القوية</th>
+                        <th>حجم التداول</th>
                         <th>الرابط</th>
                     </tr>
-                    {% for item in stats.recent_arbs %}
+                    {% for item in stats.recent_memes %}
                     <tr>
-                        <td class="market-title">{{ item.question }}</td>
-                        <td style="direction: ltr;">{{ item.sum }}</td>
-                        <td style="color: #34d399; font-weight: bold;">{{ item.profit }}</td>
-                        <td style="color: #38bdf8; font-weight: bold;">{{ item.liq }}</td>
-                        <td><a href="{{ item.link }}" target="_blank">فتح السوق ↗</a></td>
+                        <td class="token-name"><span style="color: #f43f5e; font-weight: bold;">{{ item.symbol }}</span> ({{ item.name }})</td>
+                        <td style="font-weight: bold; color: #fbbf24;">{{ item.chain }}</td>
+                        <td style="color: #34d399; font-weight: bold; direction: ltr;">{{ item.change }}</td>
+                        <td style="color: #38bdf8; font-weight: bold; direction: ltr;">{{ item.liq }}</td>
+                        <td style="direction: ltr;">{{ item.vol }}</td>
+                        <td><a href="{{ item.link }}" target="_blank">DexScreener ↗</a></td>
                     </tr>
                     {% endfor %}
                 </table>
                 {% else %}
-                <p style="color: #94a3b8; text-align: center;">جاري البحث عن فرص تحكيم مطابقة للشروط...</p>
-                {% endif %}
-            </section>
-
-            <section>
-                <h2>💎 صفقات نخبة المحافظ والسيولة</h2>
-                {% if stats.recent_whales %}
-                <table>
-                    <tr>
-                        <th>المحفظة</th>
-                        <th>الحركة</th>
-                        <th>اسم العملة / الحدث</th>
-                        <th>القيمة</th>
-                        <th>السيولة القوية</th>
-                        <th>الرابط</th>
-                    </tr>
-                    {% for item in stats.recent_whales %}
-                    <tr>
-                        <td style="font-family: monospace; color: #fbbf24; direction: ltr;">{{ item.wallet }}</td>
-                        <td style="font-weight: bold;">{{ item.action }}</td>
-                        <td class="market-title">{{ item.title }}</td>
-                        <td style="color: #f43f5e; font-weight: bold; direction: ltr;">{{ item.usd }}</td>
-                        <td style="color: #38bdf8; font-weight: bold;">{{ item.liq }}</td>
-                        <td><a href="{{ item.link }}" target="_blank">رابط السوق ↗</a></td>
-                    </tr>
-                    {% endfor %}
-                </table>
-                {% else %}
-                <p style="color: #94a3b8; text-align: center;">جاري رصد صفقات نخبة المحافظ...</p>
+                <p style="color: #94a3b8; text-align: center;">جاري البحث عن عملات ميم تنفجر بالسيولة الآن...</p>
                 {% endif %}
             </section>
 
             <div class="footer">
-                تم التطوير خصيصاً لـ عبد الرحمن | Polymarket Elite Sentinel 2026
+                تم التطوير خصيصاً لـ عبد الرحمن | Meme Sniper Sentinel 2026
             </div>
         </div>
     </body>
