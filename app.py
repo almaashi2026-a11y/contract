@@ -115,10 +115,10 @@ def scan_arb():
             
             msg = (
                 f"🎯 **[فرصة تحكيم مؤسسية - ARB]**\n"
-                f"📌 السوق: {q_text}\n"
+                f"🪙 **العملة / الحدث:** {q_text}\n"
                 f"⚖️ مجموع الأسعار (YES+NO): `{s:.3f}`\n"
                 f"💎 ربح نظري تقديري: `+{profit_pct:.1f}%`\n"
-                f"💧 السيولة المتاحة: `${liq:,.0f}`\n"
+                f"💧 **السيولة القوية:** `${liq:,.0f}`\n"
                 f"🔗 [رابط السوق](https://polymarket.com/market/{slug})"
             )
             tg(msg)
@@ -168,12 +168,16 @@ def poll_elite_trades():
                 slug = t.get('marketSlug', '')
                 market_link = f"https://polymarket.com/market/{slug}" if slug else "https://polymarket.com"
                 
+                market_liq = float(t.get('liquidity', 0) or 0)
+                liq_text = f"${market_liq:,.0f}" if market_liq > 0 else "قوية (نشطة)"
+                
                 msg = (
                     f"💎🔥 **[صيد مبكر - صفقة محفظة نخبة]**\n"
+                    f"🪙 **العملة / الحدث:** {title}\n"
                     f"👛 المحفظة: `{w_short}`\n"
                     f"🚀 الحركة: `{side} {outcome}` بسعر `{price}`\n"
-                    f"📌 السوق: {title}\n"
-                    f"💵 القيمة: `${usd:,.0f}`\n"
+                    f"💵 قيمة الصفقة: `${usd:,.0f}`\n"
+                    f"💧 **السيولة القوية:** `{liq_text}`\n"
                     f"🔗 [رابط السوق مباشر]({market_link})"
                 )
                 tg(msg)
@@ -185,6 +189,7 @@ def poll_elite_trades():
                     "action": f"{side} {outcome}",
                     "title": title,
                     "usd": f"${usd:,.0f}",
+                    "liq": liq_text,
                     "link": market_link
                 })
                 if len(stats["recent_whales"]) > 10:
@@ -195,7 +200,7 @@ def poll_elite_trades():
 def background_monitor():
     global stats
     stats["status"] = "🟢 نظام رصد النخبة والتحكيم يعمل بكفاءة تامة..."
-    tg("✅ **Polymarket Elite Sentinel** تم تفعيله ويرصد نخبة المحافظ الآن...")
+    tg("✅ **Polymarket Elite Sentinel** تم تفعيله ويرصد النخبة والسيولة الآن...")
     
     fetch_top_wallets()
     
@@ -242,6 +247,7 @@ def index():
             table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
             th, td { padding: 10px; text-align: right; border-bottom: 1px solid #334155; }
             th { color: #94a3b8; }
+            .market-title { direction: ltr; text-align: right; unicode-bidi: plaintext; font-weight: bold; color: #f8fafc; }
             a { color: #38bdf8; text-decoration: none; }
             a:hover { text-decoration: underline; }
             .footer { text-align: center; color: #64748b; font-size: 12px; margin-top: 30px; }
@@ -250,7 +256,7 @@ def index():
     <body>
         <div class="container">
             <header>
-                <h1>💎 Polymarket Elite Sentinel (صيد النخبة)</h1>
+                <h1>💎 Polymarket Elite Sentinel (صيد النخبة والسيولة)</h1>
                 <div class="status">{{ stats.status }}</div>
                 <div style="color: #94a3b8; font-size: 12px; margin-top: 5px;">آخر تحديث: {{ stats.last_update }} (تحديث تلقائي كل 15 ثانية)</div>
             </header>
@@ -279,18 +285,18 @@ def index():
                 {% if stats.recent_arbs %}
                 <table>
                     <tr>
-                        <th>السوق</th>
+                        <th>اسم العملة / الحدث</th>
                         <th>المجموع</th>
                         <th>الربح التقديري</th>
-                        <th>السيولة</th>
+                        <th>السيولة القوية</th>
                         <th>الرابط</th>
                     </tr>
                     {% for item in stats.recent_arbs %}
                     <tr>
-                        <td>{{ item.question }}</td>
+                        <td class="market-title">{{ item.question }}</td>
                         <td style="direction: ltr;">{{ item.sum }}</td>
                         <td style="color: #34d399; font-weight: bold;">{{ item.profit }}</td>
-                        <td>{{ item.liq }}</td>
+                        <td style="color: #38bdf8; font-weight: bold;">{{ item.liq }}</td>
                         <td><a href="{{ item.link }}" target="_blank">فتح السوق ↗</a></td>
                     </tr>
                     {% endfor %}
@@ -301,22 +307,24 @@ def index():
             </section>
 
             <section>
-                <h2>💎 صفقات نخبة المحافظ (التتبع المبكر)</h2>
+                <h2>💎 صفقات نخبة المحافظ والسيولة</h2>
                 {% if stats.recent_whales %}
                 <table>
                     <tr>
                         <th>المحفظة</th>
                         <th>الحركة</th>
-                        <th>السوق</th>
+                        <th>اسم العملة / الحدث</th>
                         <th>القيمة</th>
+                        <th>السيولة القوية</th>
                         <th>الرابط</th>
                     </tr>
                     {% for item in stats.recent_whales %}
                     <tr>
-                        <td style="font-family: monospace; color: #fbbf24;">{{ item.wallet }}</td>
+                        <td style="font-family: monospace; color: #fbbf24; direction: ltr;">{{ item.wallet }}</td>
                         <td style="font-weight: bold;">{{ item.action }}</td>
-                        <td>{{ item.title }}</td>
-                        <td style="color: #f43f5e; font-weight: bold;" style="direction: ltr;">{{ item.usd }}</td>
+                        <td class="market-title">{{ item.title }}</td>
+                        <td style="color: #f43f5e; font-weight: bold; direction: ltr;">{{ item.usd }}</td>
+                        <td style="color: #38bdf8; font-weight: bold;">{{ item.liq }}</td>
                         <td><a href="{{ item.link }}" target="_blank">رابط السوق ↗</a></td>
                     </tr>
                     {% endfor %}
