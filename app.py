@@ -11,25 +11,23 @@ app = Flask('')
 TG_TOKEN = os.environ.get("TG_TOKEN")
 TG_CHAT = os.environ.get("TG_CHAT")
 
-# مصادر رصد عملات الميم والسيولة (مثل DexScreener / Pump / APIs المخصصة)
-DEX_API = "https://api.dexscreener.com/latest/dex/tokens/"
-TRENDING_DEX = "https://api.dexscreener.com/latest/dex/trending/tokens"
+# استخدام واجهات تتبع السيفقات والتوكنات الحية لشبكات الميم
+TRENDING_URL = "https://api.dexscreener.com/latest/dex/trending/tokens"
+LATEST_PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
 
-MIN_LIQ_MEME = 5000    # حد أدنى للسيولة القوية لعملات الميم ($)
-MIN_VOL_MEME = 10000   # حد أدنى لحجم التداول القوي ($)
-ALERT_MIN_USD = 50     # الحد الأدنى لقيمة الصفقة المرصودة
+MIN_LIQ = 8000       # الحد الأدنى للسيولة القوية ($)
+MIN_VOL = 15000      # الحد الأدنى لحجم التداول ($)
 
 # ذاكرة ذكية لمنع تكرار التنبيهات
 SEEN = OrderedDict()
 MAX_SEEN_SIZE = 20000
 
-# سجلات العرض في لوحة التحكم الخاصة بعملات الميم
+# سجلات العرض في لوحة التحكم
 stats = {
-    "status": "🟢 نظام صيد ومراقبة عملات الميم وحيتانها يعمل بنجاح...",
-    "meme_count": 0,
-    "whale_alerts": 0,
+    "status": "🟢 نظام صيد محافظ النخبة والعملات المبكرة يعمل بكفاءة...",
+    "alerts_count": 0,
     "last_update": "لم يتم التحديث بعد",
-    "recent_memes": []
+    "recent_snipes": []
 }
 
 def add_to_seen(key):
@@ -60,18 +58,17 @@ def get(url):
         return r.json()
     except Exception as e:
         print(f"API Error [{url}]:", e)
-        return {}
+        return []
 
-def scan_memecoins():
+def scan_early_memes():
     global stats
-    data = get(TRENDING_DEX)
+    data = get(TRENDING_URL)
     pairs = data.get("pairs", [])
     if not isinstance(pairs, list):
         return
 
     for p in pairs:
         try:
-            # التركيز على شبكات الميم الكبرى مثل Solana, Base, Ethereum
             chain = p.get("chainId", "")
             if chain not in ["solana", "base", "ethereum"]:
                 continue
@@ -79,59 +76,60 @@ def scan_memecoins():
             liq = float(p.get("liquidity", {}).get("usd", 0) or 0)
             vol = float(p.get("volume", {}).get("h24", 0) or 0)
             
-            if liq < MIN_LIQ_MEME or vol < MIN_VOL_MEME:
+            if liq < MIN_LIQ or vol < MIN_VOL:
                 continue
                 
             token_addr = p.get("baseToken", {}).get("address", "")
             symbol = p.get("baseToken", {}).get("symbol", "UNKNOWN")
-            name = p.get("baseToken", {}).get("name", "Unknown Meme")
-            price_change = float(p.get("priceChange", {}).get("h1", 0) or 0)
+            name = p.get("baseToken", {}).get("name", "Unknown")
+            price_change = float(p.get("priceChange", {}).get("h5m", 0) or 0) # التركيز على الزخم خلال 5 دقائق الأخيرة (صيد مبكر جداً)
             
-            if price_change <= 3.0: # نبحث عن العملات التي تبدأ بالانفجار والزخم (أكثر من 3% في ساعة)
+            if price_change < 1.0: # نبحث عن العملات التي تبدأ بالحركة للتو
                 continue
                 
-            key = ("meme_pump", token_addr, round(price_change, 1))
+            key = ("snipe", token_addr)
             if add_to_seen(key):
                 continue
                 
             dex_url = p.get("url", "https://dexscreener.com")
             
             msg = (
-                f"🐸🚀 **[انفجار عملة ميم جديدة - MEME ALERT]**\n"
+                f"🎯🔥 **[صيد مبكر - عملة ميم جديدة بالسيولة]**\n"
                 f"🪙 **العملة:** `{symbol}` ({name})\n"
                 f"🌐 **الشبكة:** `{chain.upper()}`\n"
-                f"🔥 **زخم (ساعة):** `+{price_change}%`\n"
+                f"🚀 **زخم (5 دقائق):** `+{price_change}%`\n"
                 f"💧 **السيولة القوية:** `${liq:,.0f}`\n"
                 f"📊 **حجم التداول:** `${vol:,.0f}`\n"
-                f"🔗 [رابط DexScreener]({dex_url})"
+                f"🔗 [رابط الشاهد / DexScreener]({dex_url})\n"
+                f"📋 **العنوان:** `{token_addr}`"
             )
             tg(msg)
             
-            stats["meme_count"] += 1
+            stats["alerts_count"] += 1
             stats["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            stats["recent_memes"].insert(0, {
+            stats["recent_snipes"].insert(0, {
                 "symbol": symbol,
                 "name": name,
                 "chain": chain.upper(),
                 "change": f"+{price_change}%",
                 "liq": f"${liq:,.0f}",
-                "vol": f"${vol:,.0f}",
+                "address": token_addr,
                 "link": dex_url
             })
-            if len(stats["recent_memes"]) > 15:
-                stats["recent_memes"].pop()
+            if len(stats["recent_snipes"]) > 15:
+                stats["recent_snipes"].pop()
         except Exception:
             continue
 
 def background_monitor():
     global stats
-    tg("✅ **Meme Sniper Bot** تم تفعيل نظام رصد عملات الميم والسيولة بنجاح...")
+    tg("✅ **Meme Early Sniper** تم تفعيل نظام رصد الصفقات المبكرة والسيولة القوية بنجاح...")
     while True:
         try:
-            scan_memecoins()
+            scan_early_memes()
         except Exception as e:
             print("Monitor Loop Error:", e)
-        time.sleep(30) # فحص دوري كل 30 ثانية لعملات الميم
+        time.sleep(20)
 
 @app.route('/')
 def index():
@@ -140,20 +138,20 @@ def index():
     <html lang="ar" dir="rtl">
     <head>
         <meta charset="UTF-8">
-        <title>Meme Sniper Dashboard - عبد الرحمن</title>
+        <title>Early Meme Sniper - عبد الرحمن</title>
         <meta http-equiv="refresh" content="15">
         <style>
             body { background: #0b0f19; color: #f8fafc; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
             .container { max-width: 1100px; margin: auto; }
             header { text-align: center; padding: 20px; background: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; }
-            h1 { color: #f43f5e; margin: 0 0 10px 0; font-size: 24px; }
+            h1 { color: #38bdf8; margin: 0 0 10px 0; font-size: 24px; }
             .status { color: #34d399; font-weight: bold; font-size: 14px; }
             .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-bottom: 25px; }
             .card { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; text-align: center; }
             .card h3 { margin: 0 0 10px 0; color: #94a3b8; font-size: 14px; }
             .card .val { font-size: 24px; font-weight: bold; color: #38bdf8; }
             section { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; margin-bottom: 20px; }
-            h2 { color: #f43f5e; font-size: 18px; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-top: 0; }
+            h2 { color: #38bdf8; font-size: 18px; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-top: 0; }
             table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
             th, td { padding: 10px; text-align: right; border-bottom: 1px solid #334155; }
             th { color: #94a3b8; }
@@ -166,15 +164,15 @@ def index():
     <body>
         <div class="container">
             <header>
-                <h1>🐸🔥 Meme Sniper Sentinel (رصد انفجارات عملات الميم)</h1>
+                <h1>🎯 Meme Early Sniper (رصد الصفقات المبكرة والسيولة القوية)</h1>
                 <div class="status">{{ stats.status }}</div>
                 <div style="color: #94a3b8; font-size: 12px; margin-top: 5px;">آخر تحديث: {{ stats.last_update }} (تحديث تلقائي كل 15 ثانية)</div>
             </header>
 
             <div class="grid">
                 <div class="card">
-                    <h3>فرص الميم المرصودة</h3>
-                    <div class="val" style="color: #34d399;">{{ stats.meme_count }}</div>
+                    <h3>العملات المرصودة (الصيد المبكر)</h3>
+                    <div class="val" style="color: #34d399;">{{ stats.alerts_count }}</div>
                 </div>
                 <div class="card">
                     <h3>حالة الذاكرة (SEEN)</h3>
@@ -183,35 +181,35 @@ def index():
             </div>
 
             <section>
-                <h2>🚀 أحدث عملات الميم المكتشفة بالسيولة القوية</h2>
-                {% if stats.recent_memes %}
+                <h2>🚀 أحدث عملات الميم المكتكتشفة في بدايتها بالسيولة القوية</h2>
+                {% if stats.recent_snipes %}
                 <table>
                     <tr>
                         <th>العملة / الرمز</th>
                         <th>الشبكة</th>
-                        <th>الزخم (ساعة)</th>
+                        <th>زخم 5 دقائق</th>
                         <th>السيولة القوية</th>
-                        <th>حجم التداول</th>
+                        <th>العنوان (Contract)</th>
                         <th>الرابط</th>
                     </tr>
-                    {% for item in stats.recent_memes %}
+                    {% for item in stats.recent_snipes %}
                     <tr>
-                        <td class="token-name"><span style="color: #f43f5e; font-weight: bold;">{{ item.symbol }}</span> ({{ item.name }})</td>
+                        <td class="token-name"><span style="color: #38bdf8; font-weight: bold;">{{ item.symbol }}</span> ({{ item.name }})</td>
                         <td style="font-weight: bold; color: #fbbf24;">{{ item.chain }}</td>
                         <td style="color: #34d399; font-weight: bold; direction: ltr;">{{ item.change }}</td>
-                        <td style="color: #38bdf8; font-weight: bold; direction: ltr;">{{ item.liq }}</td>
-                        <td style="direction: ltr;">{{ item.vol }}</td>
+                        <td style="color: #f43f5e; font-weight: bold; direction: ltr;">{{ item.liq }}</td>
+                        <td style="font-family: monospace; font-size: 11px; direction: ltr;">{{ item.address[:8] }}...{{ item.address[-6:] }}</td>
                         <td><a href="{{ item.link }}" target="_blank">DexScreener ↗</a></td>
                     </tr>
                     {% endfor %}
                 </table>
                 {% else %}
-                <p style="color: #94a3b8; text-align: center;">جاري البحث عن عملات ميم تنفجر بالسيولة الآن...</p>
+                <p style="color: #94a3b8; text-align: center;">جاري البحث عن العملات فور ظهورها واشتعال السيولة عليها...</p>
                 {% endif %}
             </section>
 
             <div class="footer">
-                تم التطوير خصيصاً لـ عبد الرحمن | Meme Sniper Sentinel 2026
+                تم التطوير خصيصاً لـ عبد الرحمن | Meme Early Sniper 2026
             </div>
         </div>
     </body>
