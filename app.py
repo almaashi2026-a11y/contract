@@ -1,225 +1,172 @@
-import os
-import time
-import json
-import requests
-import threading
-from flask import Flask, render_template_string
-from collections import defaultdict, OrderedDict
+import os, time, threading, requests
+from datetime import date
+from concurrent.futures import ThreadPoolExecutor
+from py_clob_client.client import ClobClient
+from py_clob_client.clob_types import MarketOrderArgs, OrderType
+from py_clob_client.order_builder.constants import BUY
 
-app = Flask('')
+TG_TOKEN = os.environ["TG_TOKEN"]
+TG_CHAT = os.environ["TG_CHAT"]
+DRY_RUN = os.environ.get("DRY_RUN", "1") == "1"   # 1 = تنبيه فقط
+PK = os.environ.get("PK")                          # المفتاح الخاص (Render فقط)
+FUNDER = os.environ.get("FUNDER")                  # عنوان محفظة بولي ماركت
+SIG_TYPE = int(os.environ.get("SIG_TYPE", "1"))    # 1 إيميل/Magic، 2 متصفح
 
-TG_TOKEN = os.environ.get("TG_TOKEN")
-TG_CHAT = os.environ.get("TG_CHAT")
+BUY_USD = float(os.environ.get("BUY_USD", "5"))
+DAILY_CAP = float(os.environ.get("DAILY_CAP", "30"))
+MAX_SLIPPAGE = 0.03       # أقصى فرق بين سعره وسعرك
+MAX_PRICE = 0.85
+MIN_LEADER_USD = 100
+ELITE_PNL, ELITE_WIN, ELITE_MIN_CLOSED = 3000, 0.60, 15
+MAX_ELITE = 25
+POLL_EVERY = 1.5
 
-# استخدام واجهات تتبع السيفقات والتوكنات الحية لشبكات الميم
-TRENDING_URL = "https://api.dexscreener.com/latest/dex/trending/tokens"
-LATEST_PROFILES_URL = "https://api.dexscreener.com/token-profiles/latest/v1"
+DATA = "https://data-api.polymarket.com"
+HOST = "https://clob.polymarket.com"
 
-MIN_LIQ = 8000       # الحد الأدنى للسيولة القوية ($)
-MIN_VOL = 15000      # الحد الأدنى لحجم التداول ($)
+pub = ClobClient(HOST)
+trader = None
+if not DRY_RUN:
+    trader = ClobClient(HOST, key=PK, chain_id=137,
+                        signature_type=SIG_TYPE, funder=FUNDER)
+    trader.set_api_creds(trader.create_or_derive_api_creds())
 
-# ذاكرة ذكية لمنع تكرار التنبيهات
-SEEN = OrderedDict()
-MAX_SEEN_SIZE = 20000
+elite = {}               # wallet -> pnl
+score_cache = {}
+seen_disc, seen_w, warmed = set(), set(), set()
+held = {}                # asset -> سعر دخولنا
+spent = {"day": date.today(), "usd": 0.0}
 
-# سجلات العرض في لوحة التحكم
-stats = {
-    "status": "🟢 نظام صيد محافظ النخبة والعملات المبكرة يعمل بكفاءة...",
-    "alerts_count": 0,
-    "last_update": "لم يتم التحديث بعد",
-    "recent_snipes": []
-}
-
-def add_to_seen(key):
-    if key in SEEN:
-        SEEN.move_to_end(key)
-        return True
-    SEEN[key] = True
-    if len(SEEN) > MAX_SEEN_SIZE:
-        SEEN.popitem(last=False)
-    return False
 
 def tg(msg):
-    if not TG_TOKEN or not TG_CHAT:
-        return
     try:
-        requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": msg, "disable_web_page_preview": True},
-            timeout=10
-        )
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                      json={"chat_id": TG_CHAT, "text": msg,
+                            "disable_web_page_preview": True}, timeout=10)
     except Exception as e:
-        print("Telegram Error:", e)
+        print("tg err", e)
 
-def get(url):
+
+def get(url, **p):
     try:
-        r = requests.get(url, timeout=15)
+        r = requests.get(url, params=p, timeout=10)
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print(f"API Error [{url}]:", e)
-        return []
+        print("api err", url, e)
+        return None
 
-def scan_early_memes():
-    global stats
-    data = get(TRENDING_URL)
-    pairs = data.get("pairs", [])
-    if not isinstance(pairs, list):
-        return
 
-    for p in pairs:
-        try:
-            chain = p.get("chainId", "")
-            if chain not in ["solana", "base", "ethereum"]:
-                continue
-                
-            liq = float(p.get("liquidity", {}).get("usd", 0) or 0)
-            vol = float(p.get("volume", {}).get("h24", 0) or 0)
-            
-            if liq < MIN_LIQ or vol < MIN_VOL:
-                continue
-                
-            token_addr = p.get("baseToken", {}).get("address", "")
-            symbol = p.get("baseToken", {}).get("symbol", "UNKNOWN")
-            name = p.get("baseToken", {}).get("name", "Unknown")
-            price_change = float(p.get("priceChange", {}).get("h5m", 0) or 0) # التركيز على الزخم خلال 5 دقائق الأخيرة (صيد مبكر جداً)
-            
-            if price_change < 1.0: # نبحث عن العملات التي تبدأ بالحركة للتو
-                continue
-                
-            key = ("snipe", token_addr)
-            if add_to_seen(key):
-                continue
-                
-            dex_url = p.get("url", "https://dexscreener.com")
-            
-            msg = (
-                f"🎯🔥 **[صيد مبكر - عملة ميم جديدة بالسيولة]**\n"
-                f"🪙 **العملة:** `{symbol}` ({name})\n"
-                f"🌐 **الشبكة:** `{chain.upper()}`\n"
-                f"🚀 **زخم (5 دقائق):** `+{price_change}%`\n"
-                f"💧 **السيولة القوية:** `${liq:,.0f}`\n"
-                f"📊 **حجم التداول:** `${vol:,.0f}`\n"
-                f"🔗 [رابط الشاهد / DexScreener]({dex_url})\n"
-                f"📋 **العنوان:** `{token_addr}`"
-            )
-            tg(msg)
-            
-            stats["alerts_count"] += 1
-            stats["last_update"] = time.strftime("%Y-%m-%d %H:%M:%S")
-            stats["recent_snipes"].insert(0, {
-                "symbol": symbol,
-                "name": name,
-                "chain": chain.upper(),
-                "change": f"+{price_change}%",
-                "liq": f"${liq:,.0f}",
-                "address": token_addr,
-                "link": dex_url
-            })
-            if len(stats["recent_snipes"]) > 15:
-                stats["recent_snipes"].pop()
-        except Exception:
-            continue
+def score(w):
+    c = score_cache.get(w)
+    if c and time.time() - c[0] < 6 * 3600:
+        return c
+    d = get(f"{DATA}/closed-positions", user=w, limit=50)
+    if d is None:
+        return None
+    pnl = sum(float(x.get("realizedPnl", 0) or 0) for x in d)
+    win = sum(1 for x in d if float(x.get("realizedPnl", 0) or 0) > 0) / max(len(d), 1)
+    ok = len(d) >= ELITE_MIN_CLOSED and pnl >= ELITE_PNL and win >= ELITE_WIN
+    score_cache[w] = (time.time(), ok, pnl, win)
+    return score_cache[w]
 
-def background_monitor():
-    global stats
-    tg("✅ **Meme Early Sniper** تم تفعيل نظام رصد الصفقات المبكرة والسيولة القوية بنجاح...")
+
+def discovery():
     while True:
         try:
-            scan_early_memes()
+            calls = 0
+            for t in reversed(get(f"{DATA}/trades", limit=500) or []):
+                k = (t.get("transactionHash"), t.get("asset"), t.get("side"), t.get("size"))
+                if k in seen_disc:
+                    continue
+                seen_disc.add(k)
+                w = t.get("proxyWallet")
+                usd = float(t.get("size", 0) or 0) * float(t.get("price", 0) or 0)
+                if not w or t.get("side") != "BUY" or usd < MIN_LEADER_USD or w in elite:
+                    continue
+                if w not in score_cache and calls >= 15:
+                    continue
+                calls += 1
+                s = score(w)
+                if s and s[1]:
+                    elite[w] = s[2]
+                    if len(elite) > MAX_ELITE:
+                        elite.pop(min(elite, key=elite.get))
+            if len(seen_disc) > 200000:
+                seen_disc.clear()
         except Exception as e:
-            print("Monitor Loop Error:", e)
-        time.sleep(20)
+            print("disc err", e)
+        time.sleep(15)
 
-@app.route('/')
-def index():
-    return render_template_string("""
-    <!DOCTYPE html>
-    <html lang="ar" dir="rtl">
-    <head>
-        <meta charset="UTF-8">
-        <title>Early Meme Sniper - عبد الرحمن</title>
-        <meta http-equiv="refresh" content="15">
-        <style>
-            body { background: #0b0f19; color: #f8fafc; font-family: Tahoma, sans-serif; margin: 0; padding: 20px; }
-            .container { max-width: 1100px; margin: auto; }
-            header { text-align: center; padding: 20px; background: #1e293b; border-radius: 12px; border: 1px solid #334155; margin-bottom: 20px; }
-            h1 { color: #38bdf8; margin: 0 0 10px 0; font-size: 24px; }
-            .status { color: #34d399; font-weight: bold; font-size: 14px; }
-            .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-bottom: 25px; }
-            .card { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; text-align: center; }
-            .card h3 { margin: 0 0 10px 0; color: #94a3b8; font-size: 14px; }
-            .card .val { font-size: 24px; font-weight: bold; color: #38bdf8; }
-            section { background: #1e293b; padding: 20px; border-radius: 10px; border: 1px solid #334155; margin-bottom: 20px; }
-            h2 { color: #38bdf8; font-size: 18px; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-top: 0; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
-            th, td { padding: 10px; text-align: right; border-bottom: 1px solid #334155; }
-            th { color: #94a3b8; }
-            .token-name { direction: ltr; text-align: right; unicode-bidi: plaintext; font-weight: bold; color: #f8fafc; }
-            a { color: #38bdf8; text-decoration: none; }
-            a:hover { text-decoration: underline; }
-            .footer { text-align: center; color: #64748b; font-size: 12px; margin-top: 30px; }
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <header>
-                <h1>🎯 Meme Early Sniper (رصد الصفقات المبكرة والسيولة القوية)</h1>
-                <div class="status">{{ stats.status }}</div>
-                <div style="color: #94a3b8; font-size: 12px; margin-top: 5px;">آخر تحديث: {{ stats.last_update }} (تحديث تلقائي كل 15 ثانية)</div>
-            </header>
 
-            <div class="grid">
-                <div class="card">
-                    <h3>العملات المرصودة (الصيد المبكر)</h3>
-                    <div class="val" style="color: #34d399;">{{ stats.alerts_count }}</div>
-                </div>
-                <div class="card">
-                    <h3>حالة الذاكرة (SEEN)</h3>
-                    <div class="val" style="color: #fbbf24;">{{ seen_count }}</div>
-                </div>
-            </div>
+def best_ask(asset):
+    try:
+        r = pub.get_price(asset, "BUY")
+        return float(r["price"] if isinstance(r, dict) else r)
+    except Exception as e:
+        print("price err", e)
+        return None
 
-            <section>
-                <h2>🚀 أحدث عملات الميم المكتكتشفة في بدايتها بالسيولة القوية</h2>
-                {% if stats.recent_snipes %}
-                <table>
-                    <tr>
-                        <th>العملة / الرمز</th>
-                        <th>الشبكة</th>
-                        <th>زخم 5 دقائق</th>
-                        <th>السيولة القوية</th>
-                        <th>العنوان (Contract)</th>
-                        <th>الرابط</th>
-                    </tr>
-                    {% for item in stats.recent_snipes %}
-                    <tr>
-                        <td class="token-name"><span style="color: #38bdf8; font-weight: bold;">{{ item.symbol }}</span> ({{ item.name }})</td>
-                        <td style="font-weight: bold; color: #fbbf24;">{{ item.chain }}</td>
-                        <td style="color: #34d399; font-weight: bold; direction: ltr;">{{ item.change }}</td>
-                        <td style="color: #f43f5e; font-weight: bold; direction: ltr;">{{ item.liq }}</td>
-                        <td style="font-family: monospace; font-size: 11px; direction: ltr;">{{ item.address[:8] }}...{{ item.address[-6:] }}</td>
-                        <td><a href="{{ item.link }}" target="_blank">DexScreener ↗</a></td>
-                    </tr>
-                    {% endfor %}
-                </table>
-                {% else %}
-                <p style="color: #94a3b8; text-align: center;">جاري البحث عن العملات فور ظهورها واشتعال السيولة عليها...</p>
-                {% endif %}
-            </section>
 
-            <div class="footer">
-                تم التطوير خصيصاً لـ عبد الرحمن | Meme Early Sniper 2026
-            </div>
-        </div>
-    </body>
-    </html>
-    """, stats=stats, seen_count=len(SEEN))
+def handle(w, t):
+    asset, side = t.get("asset"), t.get("side")
+    price = float(t.get("price", 0) or 0)
+    usd = float(t.get("size", 0) or 0) * price
+    delay = time.time() - int(t.get("timestamp") or time.time())
+    tag = f"{w[:6]}…{w[-4:]}"
+    if side == "SELL":
+        if asset in held:
+            tg(f"⚠️ الـ elite {tag} يبيع شي عندك!\n{t.get('title')}\nفكّر تطلع.")
+        return
+    if usd < MIN_LEADER_USD or price > MAX_PRICE or asset in held:
+        return
+    ask = best_ask(asset)
+    if ask is None or ask - price > MAX_SLIPPAGE:
+        tg(f"⏭️ تخطيت (السعر طار): {t.get('title')}\nهو {price:.2f} | الحين {ask}")
+        return
+    if spent["day"] != date.today():
+        spent.update(day=date.today(), usd=0.0)
+    if spent["usd"] + BUY_USD > DAILY_CAP:
+        tg("🛑 وصلت الحد اليومي")
+        return
+    head = (f"{t.get('title')}\n{t.get('outcome')} | دخل {price:.2f} (${usd:,.0f})\n"
+            f"سعرك الحين: {ask:.2f} | تأخير: {delay:.0f}ث | {tag} (ربح ${elite.get(w, 0):,.0f})")
+    if DRY_RUN:
+        tg("🧪 [تجربة] كان بيشتري\n" + head)
+        held[asset] = ask
+        return
+    try:
+        signed = trader.create_market_order(
+            MarketOrderArgs(token_id=asset, amount=BUY_USD, side=BUY))
+        resp = trader.post_order(signed, OrderType.FOK)
+        ok = bool(resp.get("success"))
+        if ok:
+            held[asset] = ask
+            spent["usd"] += BUY_USD
+        tg(("✅ اشتريت $%.0f\n" % BUY_USD if ok else "❌ فشل الشراء\n") + head + f"\n{resp}")
+    except Exception as e:
+        tg(f"❌ خطأ بالتنفيذ: {e}\n{head}")
+
+
+def poll_wallet(w):
+    d = get(f"{DATA}/trades", user=w, limit=10)
+    if not d:
+        return
+    for t in reversed(d):
+        k = (t.get("transactionHash"), t.get("asset"), t.get("side"), t.get("size"))
+        if k in seen_w:
+            continue
+        seen_w.add(k)
+        if w in warmed:
+            handle(w, t)
+    warmed.add(w)
+
 
 if __name__ == "__main__":
-    t = threading.Thread(target=background_monitor)
-    t.daemon = True
-    t.start()
-    
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    tg(f"✅ v3 شغّال | {'تجربة DRY_RUN' if DRY_RUN else '⚡ تنفيذ حقيقي'}")
+    threading.Thread(target=discovery, daemon=True).start()
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        while True:
+            t0 = time.time()
+            list(ex.map(poll_wallet, list(elite)))
+            time.sleep(max(0, POLL_EVERY - (time.time() - t0)))
