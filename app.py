@@ -1,172 +1,184 @@
-import os, time, threading, requests
-from datetime import date
-from concurrent.futures import ThreadPoolExecutor
-from py_clob_client.client import ClobClient
-from py_clob_client.clob_types import MarketOrderArgs, OrderType
-from py_clob_client.order_builder.constants import BUY
+import os, time, json, html, requests
+from datetime import datetime
+from collections import defaultdict
 
 TG_TOKEN = os.environ["TG_TOKEN"]
 TG_CHAT = os.environ["TG_CHAT"]
-DRY_RUN = os.environ.get("DRY_RUN", "1") == "1"   # 1 = تنبيه فقط
-PK = os.environ.get("PK")                          # المفتاح الخاص (Render فقط)
-FUNDER = os.environ.get("FUNDER")                  # عنوان محفظة بولي ماركت
-SIG_TYPE = int(os.environ.get("SIG_TYPE", "1"))    # 1 إيميل/Magic، 2 متصفح
+NETWORKS = os.environ.get(
+    "NETWORKS", "solana,base,eth,bsc,arbitrum,polygon_pos,avax,ronin,tron").split(",")
+MIN_WINS = int(os.environ.get("MIN_WINS", "2"))   # ابدأ بـ 1 أول ساعات
+PUMP_X = 3.0              # صعود 3x بعد دخول المحفظة = فوز
+MIN_WIN_USD = 50          # أقل شراء يُحسب فوز
+MIN_BUY_USD = 50          # أقل شراء يطلّع تنبيه
+MIN_LIQ = 3000            # أقل سيولة للبول
+MAX_WALLET_TRADES = 40    # فوق هذا = بوت، نتجاهله
+PER_NET = int(os.environ.get("PER_NET", "12"))    # بولات لكل سلسلة
+ALERT_WINDOW = 600        # ثواني
+REFRESH = 300
+CALL_GAP = 2.3            # حد GeckoTerminal المجاني
+BOARD_FILE = "board.json"
 
-BUY_USD = float(os.environ.get("BUY_USD", "5"))
-DAILY_CAP = float(os.environ.get("DAILY_CAP", "30"))
-MAX_SLIPPAGE = 0.03       # أقصى فرق بين سعره وسعرك
-MAX_PRICE = 0.85
-MIN_LEADER_USD = 100
-ELITE_PNL, ELITE_WIN, ELITE_MIN_CLOSED = 3000, 0.60, 15
-MAX_ELITE = 25
-POLL_EVERY = 1.5
+GT = "https://api.geckoterminal.com/api/v2"
+DEX = {"eth": "ethereum", "polygon_pos": "polygon", "avax": "avalanche"}
+GOPLUS = {"eth": 1, "bsc": 56, "base": 8453, "arbitrum": 42161,
+          "polygon_pos": 137, "avax": 43114}
 
-DATA = "https://data-api.polymarket.com"
-HOST = "https://clob.polymarket.com"
+board = {}               # "net:wallet" -> {"wins": {token: ts}}
+alerted = set()
+sec_cache = {}
+_last = [0.0]
 
-pub = ClobClient(HOST)
-trader = None
-if not DRY_RUN:
-    trader = ClobClient(HOST, key=PK, chain_id=137,
-                        signature_type=SIG_TYPE, funder=FUNDER)
-    trader.set_api_creds(trader.create_or_derive_api_creds())
-
-elite = {}               # wallet -> pnl
-score_cache = {}
-seen_disc, seen_w, warmed = set(), set(), set()
-held = {}                # asset -> سعر دخولنا
-spent = {"day": date.today(), "usd": 0.0}
+try:
+    board = json.load(open(BOARD_FILE))
+except Exception:
+    pass
 
 
 def tg(msg):
     try:
         requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                      json={"chat_id": TG_CHAT, "text": msg,
+                      json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML",
                             "disable_web_page_preview": True}, timeout=10)
     except Exception as e:
         print("tg err", e)
 
 
-def get(url, **p):
+def gt(path, **p):
+    wait = CALL_GAP - (time.time() - _last[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last[0] = time.time()
     try:
-        r = requests.get(url, params=p, timeout=10)
+        r = requests.get(GT + path, params=p, timeout=15,
+                         headers={"Accept": "application/json;version=20230302"})
+        if r.status_code == 429:
+            time.sleep(30)
+            return None
         r.raise_for_status()
         return r.json()
     except Exception as e:
-        print("api err", url, e)
+        print("gt err", path, e)
         return None
 
 
-def score(w):
-    c = score_cache.get(w)
-    if c and time.time() - c[0] < 6 * 3600:
-        return c
-    d = get(f"{DATA}/closed-positions", user=w, limit=50)
-    if d is None:
-        return None
-    pnl = sum(float(x.get("realizedPnl", 0) or 0) for x in d)
-    win = sum(1 for x in d if float(x.get("realizedPnl", 0) or 0) > 0) / max(len(d), 1)
-    ok = len(d) >= ELITE_MIN_CLOSED and pnl >= ELITE_PNL and win >= ELITE_WIN
-    score_cache[w] = (time.time(), ok, pnl, win)
-    return score_cache[w]
+def ts_of(s):
+    return datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
 
 
-def discovery():
-    while True:
+def refresh_pools():
+    out = []
+    for net in NETWORKS:
+        pools = {}
+        for ep in ("trending_pools", "new_pools"):
+            j = gt(f"/networks/{net}/{ep}")
+            for x in (j or {}).get("data", []):
+                a = x["attributes"]
+                if float(a.get("reserve_in_usd") or 0) < MIN_LIQ:
+                    continue
+                pools[a["address"]] = {
+                    "net": net, "addr": a["address"], "name": a.get("name", "?"),
+                    "liq": float(a["reserve_in_usd"]),
+                    "created": a.get("pool_created_at"),
+                    "vol": float((a.get("volume_usd") or {}).get("h1") or 0)}
+        top = sorted(pools.values(), key=lambda p: -p["vol"])[:PER_NET]
+        out += top
+    return out
+
+
+def security(net, token):
+    cid = GOPLUS.get(net)
+    if not cid:
+        return "غير مدعوم لهذي السلسلة، افحص العقد يدوي"
+    k = (net, token)
+    if k in sec_cache:
+        return sec_cache[k]
+    try:
+        r = requests.get(f"https://api.gopluslabs.io/api/v1/token_security/{cid}",
+                         params={"contract_addresses": token}, timeout=10).json()
+        d = r["result"][token.lower()]
+        s = ("🚨 HONEYPOT" if d.get("is_honeypot") == "1" else "ما فيه honeypot ظاهر") + \
+            f" | ضريبة شراء {d.get('buy_tax') or '?'} / بيع {d.get('sell_tax') or '?'}"
+    except Exception:
+        s = "ما قدرت أفحص، افحص يدوي"
+    sec_cache[k] = s
+    return s
+
+
+def is_smart(key):
+    return len(board.get(key, {}).get("wins", {})) >= MIN_WINS
+
+
+def alert(p, w, token, usd, price):
+    net = p["net"]
+    sym = html.escape(p["name"].split(" / ")[0])
+    age = ""
+    if p["created"]:
+        age = f" | عمر: {(time.time() - ts_of(p['created'])) / 3600:.1f}س"
+    wins = len(board[f"{net}:{w}"]["wins"])
+    tg(f"🧠 <b>محفظة ذكية اشترت</b>\n"
+       f"🪙 {html.escape(p['name'])} | {net.upper()}\n"
+       f"📜 العقد:\n<code>{token}</code>\n"
+       f"💰 اشترت ${usd:,.0f} @ ${price:.8g}\n"
+       f"💧 سيولة ${p['liq']:,.0f}{age}\n"
+       f"👛 <code>{w}</code> (انتصارات: {wins})\n"
+       f"🛡️ {security(net, token)}\n"
+       f"https://dexscreener.com/{DEX.get(net, net)}/{p['addr']}")
+
+
+def scan_pool(p):
+    net = p["net"]
+    j = gt(f"/networks/{net}/pools/{p['addr']}/trades")
+    rows = []
+    for x in (j or {}).get("data", []):
+        a = x["attributes"]
         try:
-            calls = 0
-            for t in reversed(get(f"{DATA}/trades", limit=500) or []):
-                k = (t.get("transactionHash"), t.get("asset"), t.get("side"), t.get("size"))
-                if k in seen_disc:
-                    continue
-                seen_disc.add(k)
-                w = t.get("proxyWallet")
-                usd = float(t.get("size", 0) or 0) * float(t.get("price", 0) or 0)
-                if not w or t.get("side") != "BUY" or usd < MIN_LEADER_USD or w in elite:
-                    continue
-                if w not in score_cache and calls >= 15:
-                    continue
-                calls += 1
-                s = score(w)
-                if s and s[1]:
-                    elite[w] = s[2]
-                    if len(elite) > MAX_ELITE:
-                        elite.pop(min(elite, key=elite.get))
-            if len(seen_disc) > 200000:
-                seen_disc.clear()
-        except Exception as e:
-            print("disc err", e)
-        time.sleep(15)
-
-
-def best_ask(asset):
-    try:
-        r = pub.get_price(asset, "BUY")
-        return float(r["price"] if isinstance(r, dict) else r)
-    except Exception as e:
-        print("price err", e)
-        return None
-
-
-def handle(w, t):
-    asset, side = t.get("asset"), t.get("side")
-    price = float(t.get("price", 0) or 0)
-    usd = float(t.get("size", 0) or 0) * price
-    delay = time.time() - int(t.get("timestamp") or time.time())
-    tag = f"{w[:6]}…{w[-4:]}"
-    if side == "SELL":
-        if asset in held:
-            tg(f"⚠️ الـ elite {tag} يبيع شي عندك!\n{t.get('title')}\nفكّر تطلع.")
-        return
-    if usd < MIN_LEADER_USD or price > MAX_PRICE or asset in held:
-        return
-    ask = best_ask(asset)
-    if ask is None or ask - price > MAX_SLIPPAGE:
-        tg(f"⏭️ تخطيت (السعر طار): {t.get('title')}\nهو {price:.2f} | الحين {ask}")
-        return
-    if spent["day"] != date.today():
-        spent.update(day=date.today(), usd=0.0)
-    if spent["usd"] + BUY_USD > DAILY_CAP:
-        tg("🛑 وصلت الحد اليومي")
-        return
-    head = (f"{t.get('title')}\n{t.get('outcome')} | دخل {price:.2f} (${usd:,.0f})\n"
-            f"سعرك الحين: {ask:.2f} | تأخير: {delay:.0f}ث | {tag} (ربح ${elite.get(w, 0):,.0f})")
-    if DRY_RUN:
-        tg("🧪 [تجربة] كان بيشتري\n" + head)
-        held[asset] = ask
-        return
-    try:
-        signed = trader.create_market_order(
-            MarketOrderArgs(token_id=asset, amount=BUY_USD, side=BUY))
-        resp = trader.post_order(signed, OrderType.FOK)
-        ok = bool(resp.get("success"))
-        if ok:
-            held[asset] = ask
-            spent["usd"] += BUY_USD
-        tg(("✅ اشتريت $%.0f\n" % BUY_USD if ok else "❌ فشل الشراء\n") + head + f"\n{resp}")
-    except Exception as e:
-        tg(f"❌ خطأ بالتنفيذ: {e}\n{head}")
-
-
-def poll_wallet(w):
-    d = get(f"{DATA}/trades", user=w, limit=10)
-    if not d:
-        return
-    for t in reversed(d):
-        k = (t.get("transactionHash"), t.get("asset"), t.get("side"), t.get("size"))
-        if k in seen_w:
+            buy = a["kind"] == "buy"
+            price = float(a["price_to_in_usd" if buy else "price_from_in_usd"] or 0)
+            token = a["to_token_address"] if buy else a["from_token_address"]
+            rows.append((ts_of(a["block_timestamp"]), a["tx_from_address"], buy,
+                         float(a["volume_in_usd"] or 0), price, token))
+        except Exception:
             continue
-        seen_w.add(k)
-        if w in warmed:
-            handle(w, t)
-    warmed.add(w)
+    if not rows:
+        return
+    rows.sort()
+    n = len(rows)
+    sufmax, m = [0.0] * n, 0.0
+    for i in range(n - 1, -1, -1):
+        m = max(m, rows[i][4])
+        sufmax[i] = m
+    cnt = defaultdict(int)
+    for r in rows:
+        cnt[r[1]] += 1
+    now, firsts = time.time(), {}
+    for i, (ts, w, buy, usd, price, token) in enumerate(rows):
+        if not buy or price <= 0:
+            continue
+        key = f"{net}:{w}"
+        if (now - ts <= ALERT_WINDOW and usd >= MIN_BUY_USD and is_smart(key)
+                and (key, token) not in alerted):
+            alerted.add((key, token))
+            alert(p, w, token, usd, price)
+        if w not in firsts:
+            firsts[w] = (i, usd, price, token)
+    for w, (i, usd, price, token) in firsts.items():
+        if (usd >= MIN_WIN_USD and cnt[w] <= MAX_WALLET_TRADES
+                and sufmax[i] / price >= PUMP_X):
+            board.setdefault(f"{net}:{w}", {"wins": {}})["wins"][token] = now
 
 
 if __name__ == "__main__":
-    tg(f"✅ v3 شغّال | {'تجربة DRY_RUN' if DRY_RUN else '⚡ تنفيذ حقيقي'}")
-    threading.Thread(target=discovery, daemon=True).start()
-    with ThreadPoolExecutor(max_workers=8) as ex:
-        while True:
-            t0 = time.time()
-            list(ex.map(poll_wallet, list(elite)))
-            time.sleep(max(0, POLL_EVERY - (time.time() - t0)))
+    tg("✅ رادار المحافظ الذكية شغّال (عملات الميم)")
+    queue, last = [], 0
+    while True:
+        if time.time() - last > REFRESH:
+            queue, last = refresh_pools(), time.time()
+        for p in queue:
+            scan_pool(p)
+        try:
+            json.dump(board, open(BOARD_FILE, "w"))
+        except Exception:
+            pass
+        if len(alerted) > 50000:
+            alerted.clear()
+        time.sleep(5)
