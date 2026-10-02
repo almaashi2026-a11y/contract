@@ -5,7 +5,6 @@ import html
 import threading
 import requests
 from datetime import datetime
-from collections import defaultdict
 from flask import Flask
 
 # الإعدادات الأساسية
@@ -15,29 +14,28 @@ NETWORKS = os.environ.get(
     "NETWORKS", "solana,base,eth,bsc,arbitrum,polygon_pos,avax,ronin,tron"
 ).split(",")
 
-MIN_WINS = int(os.environ.get("MIN_WINS", "3"))        # رفع معيار المحافظ الذكية (أقل شي 3 انتصارات مثبتة)
-PUMP_X = 3.5                  # صعود 3.5x بعد دخول المحفظة لاعتبارها ناجحة
-MIN_WIN_USD = 80              # الحد الأدنى لشراء الفوز لضمان قوة المحفظة
-MIN_BUY_USD = 70              # أقل شراء يطلّع تنبيه فوري
-MIN_LIQ = 5000                # أقل سيولة للبول ($5000) لضمان عمق السوق
-MAX_WALLET_TRADES = 30        # استبعاد المحافظ التي تداول بجنون (بوتات سبام)
-PER_NET = int(os.environ.get("PER_NET", "15"))        # عدد البولات لكل سلسلة
-ALERT_WINDOW = 600            # نافذة التنبيه بالثواني
-REFRESH = 240                 # تحديث القوائم كل 4 دقائق
-CALL_GAP = 2.2                # فاصل زمني لتجنب حظر API
-BOARD_FILE = "board_pro.json"
+MIN_WINS = int(os.environ.get("MIN_WINS", "2"))        # عدد الانتصارات المطلوبة لاعتماد المحفظة كذكية
+PUMP_X = 3.0                  # نسبة الصعود المطلوب لاحتساب الصفقة انتصاراً للمحفظة
+MIN_WIN_USD = 50              # الحد الأدنى لشراء الفوز
+MIN_BUY_USD = 40              # أقل مبلغ شراء يطلق التنبيه الفوري
+MIN_LIQ = 3000                # أقل سيولة مقبولة للبول
+PER_NET = int(os.environ.get("PER_NET", "20"))        # عدد البولات المرصودة لكل شبكة (لزيادة السرعة والشمول)
+ALERT_WINDOW = 300            # نافذة زمنية قصيرة للحرص على فورية التنبيه (بالثواني)
+REFRESH = 180                 # تحديث أسرع لقائمة البولات النشطة
+CALL_GAP = 1.5                # تقليل الفاصل الزمني للطلبات لضمان السرعة القصوى
+BOARD_FILE = "board_instant.json"
 
 GT = "https://api.geckoterminal.com/api/v2"
 DEX = {"eth": "ethereum", "polygon_pos": "polygon", "avax": "avalanche"}
 GOPLUS = {"eth": 1, "bsc": 56, "base": 8453, "arbitrum": 42161,
           "polygon_pos": 137, "avax": 43114}
 
-board = {}                   # قاعدة بيانات المحافظ الذكية
-alerted = set()              # لمنع تكرار تنبيه نفس العملة لنفس المحفظة
+board = {}                   # قاعدة بيانات المحافظ والانتصارات
+alerted = set()              # منع التكرار الفوري لنفس التنبيه
 sec_cache = {}               # ذاكرة مؤقتة لفحص الأمان
 _last = [0.0]
 
-# تحميل السجلات السابقة إن وجدت
+# تحميل السجلات السابقة
 try:
     if os.path.exists(BOARD_FILE):
         board = json.load(open(BOARD_FILE, "r"))
@@ -48,16 +46,15 @@ web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "🚀 Smart Wallet Radar Pro is Running!"
+    return "⚡ Instant Smart Money Radar is Active!"
 
 @web.route("/health")
 def health():
     smart_count = sum(1 for v in board.values() if len(v.get("wins", {})) >= MIN_WINS)
-    return f"Status: OK | Total Tracked Wallets: {len(board)} | Pro Smart Wallets: {smart_count}"
+    return f"Status: OK | Tracked Wallets: {len(board)} | Confirmed Smart: {smart_count}"
 
 def tg(msg):
     if not TG_TOKEN or not TG_CHAT:
-        print("Telegram Token or Chat ID is missing!")
         return
     try:
         requests.post(
@@ -79,10 +76,10 @@ def gt(path, **p):
         time.sleep(wait)
     _last[0] = time.time()
     try:
-        r = requests.get(GT + path, params=p, timeout=15,
+        r = requests.get(GT + path, params=p, timeout=12,
                          headers={"Accept": "application/json;version=20230302"})
         if r.status_code == 429:
-            time.sleep(35)
+            time.sleep(20)
             return None
         r.raise_for_status()
         return r.json()
@@ -123,7 +120,7 @@ def refresh_pools():
 def security(net, token):
     cid = GOPLUS.get(net)
     if not cid:
-        return "⚠️ الشبكة لا تدعم الفحص التلقائي، افحص يدوي"
+        return "⚠️ فحص الأمان اليدوي مطلوب لهذه الشبكة"
     k = (net, token)
     if k in sec_cache:
         return sec_cache[k]
@@ -131,22 +128,21 @@ def security(net, token):
         r = requests.get(
             f"https://api.gopluslabs.io/api/v1/token_security/{cid}",
             params={"contract_addresses": token},
-            timeout=10
+            timeout=8
         ).json()
         d = r.get("result", {}).get(token.lower(), {})
-        
         is_hp = d.get("is_honeypot") == "1"
         buy_t = d.get("buy_tax", "?")
         sell_t = d.get("sell_tax", "?")
-        
-        status_icon = "🚨 تنبيه Honeypot خطير!" if is_hp else "🛡️ العقد نظيف ظاهرياً"
-        s = f"{status_icon} | ضريبة شراء: {buy_t}% / بيع: {sell_t}%"
+        status_icon = "🚨 تنبيه: محتمل Honeypot!" if is_hp else "🛡️ العقد نظيف"
+        s = f"{status_icon} | شراء: {buy_t}% / بيع: {sell_t}%"
     except Exception:
-        s = "⚠️ تعذر التحقق من الأمان عبر GoPlus"
+        s = "⚠️ تعذر الفحص الأمني السريع"
     sec_cache[k] = s
     return s
 
 def is_smart(key):
+    # التحقق مما إذا كانت المحفظة مسجلة ولديها الحد الأدنى من الانتصارات السابقة
     return len(board.get(key, {}).get("wins", {})) >= MIN_WINS
 
 def alert(p, w, token, usd, price):
@@ -160,7 +156,7 @@ def alert(p, w, token, usd, price):
     dex_link = f"https://dexscreener.com/{DEX.get(net, net)}/{p['addr']}"
     
     msg = (
-        f"🔥 <b>صطحاب محفظة قوية (Smart Money)</b> 🔥\n"
+        f"🚨⚡ <b>رصد شراء مال ذكي فوري!</b> ⚡🚨\n"
         f"🪙 <b>العملة:</b> {html.escape(p['name'])} [{net.upper()}]\n"
         f"📜 <b>العقد:</b>\n<code>{token}</code>\n"
         f"💰 <b>قيمة الشراء:</b> ${usd:,.0f} @ ${price:.8g}\n"
@@ -197,17 +193,13 @@ def scan_pool(p):
         m = max(m, rows[i][4])
         sufmax[i] = m
         
-    cnt = defaultdict(int)
-    for r in rows:
-        cnt[r[1]] += 1
-        
     now, firsts = time.time(), {}
     for i, (ts, w, buy, usd, price, token) in enumerate(rows):
         if not buy or price <= 0:
             continue
         key = f"{net}:{w}"
         
-        # إرسال تنبيه إذا كانت المحفظة ذكية وتم الشراء بالحد الأدنى المطلوب
+        # ⚡ الرصد الفوري: إذا كانت المحفظة مصنفة ذكية وتم الشراء حديثاً، أرسل فوراً دون انتظار!
         if (now - ts <= ALERT_WINDOW and usd >= MIN_BUY_USD and is_smart(key)
                 and (key, token) not in alerted):
             alerted.add((key, token))
@@ -216,14 +208,13 @@ def scan_pool(p):
         if w not in firsts:
             firsts[w] = (i, usd, price, token)
             
-    # تحديث وتتبع الأرباح للمحافظ لتصنيفها كـ "ذكية"
+    # تحديث الأرباح في الخلفية لتطوير الأداء المستقبلي للمحافظ
     for w, (i, usd, price, token) in firsts.items():
-        if (usd >= MIN_WIN_USD and cnt[w] <= MAX_WALLET_TRADES
-                and sufmax[i] / price >= PUMP_X):
+        if usd >= MIN_WIN_USD and sufmax[i] / price >= PUMP_X:
             board.setdefault(f"{net}:{w}", {"wins": {}})["wins"][token] = now
 
 def main():
-    tg("🟢 <b>تم تفعيل رادار المحافظ الذكية (النسخة الاحترافية المتقدمة) بنجاح!</b>")
+    tg("⚡ **تم تفعيل رادار المال الذكي (وضع الرصد الفوري اللحظي)** بنجاح!")
     queue, last = [], 0
     while True:
         try:
@@ -235,11 +226,11 @@ def main():
                 json.dump(board, open(BOARD_FILE, "w"))
             except Exception:
                 pass
-            if len(alerted) > 40000:
+            if len(alerted) > 30000:
                 alerted.clear()
         except Exception as e:
             print("Main loop error:", e)
-        time.sleep(5)
+        time.sleep(3)  # دورة تكرار أسرع (3 ثوانٍ فقط) لضمان الفورية
 
 if __name__ == "__main__":
     threading.Thread(target=main, daemon=True).start()
