@@ -1,12 +1,13 @@
-import os, time, json, html, requests
+import os, time, json, html, threading, requests
 from datetime import datetime
 from collections import defaultdict
+from flask import Flask
 
 TG_TOKEN = os.environ["TG_TOKEN"]
 TG_CHAT = os.environ["TG_CHAT"]
 NETWORKS = os.environ.get(
     "NETWORKS", "solana,base,eth,bsc,arbitrum,polygon_pos,avax,ronin,tron").split(",")
-MIN_WINS = int(os.environ.get("MIN_WINS", "2"))   # ابدأ بـ 1 أول ساعات
+MIN_WINS = int(os.environ.get("MIN_WINS", "2"))   # ابدأ بـ 1 أول يوم
 PUMP_X = 3.0              # صعود 3x بعد دخول المحفظة = فوز
 MIN_WIN_USD = 50          # أقل شراء يُحسب فوز
 MIN_BUY_USD = 50          # أقل شراء يطلّع تنبيه
@@ -32,6 +33,19 @@ try:
     board = json.load(open(BOARD_FILE))
 except Exception:
     pass
+
+web = Flask(__name__)
+
+
+@web.route("/")
+def home():
+    return "ok"
+
+
+@web.route("/health")
+def health():
+    smart = sum(1 for v in board.values() if len(v.get("wins", {})) >= MIN_WINS)
+    return f"ok | wallets: {len(board)} | smart: {smart}"
 
 
 def tg(msg):
@@ -110,7 +124,6 @@ def is_smart(key):
 
 def alert(p, w, token, usd, price):
     net = p["net"]
-    sym = html.escape(p["name"].split(" / ")[0])
     age = ""
     if p["created"]:
         age = f" | عمر: {(time.time() - ts_of(p['created'])) / 3600:.1f}س"
@@ -167,18 +180,26 @@ def scan_pool(p):
             board.setdefault(f"{net}:{w}", {"wins": {}})["wins"][token] = now
 
 
-if __name__ == "__main__":
+def main():
     tg("✅ رادار المحافظ الذكية شغّال (عملات الميم)")
     queue, last = [], 0
     while True:
-        if time.time() - last > REFRESH:
-            queue, last = refresh_pools(), time.time()
-        for p in queue:
-            scan_pool(p)
         try:
-            json.dump(board, open(BOARD_FILE, "w"))
-        except Exception:
-            pass
-        if len(alerted) > 50000:
-            alerted.clear()
+            if time.time() - last > REFRESH:
+                queue, last = refresh_pools(), time.time()
+            for p in queue:
+                scan_pool(p)
+            try:
+                json.dump(board, open(BOARD_FILE, "w"))
+            except Exception:
+                pass
+            if len(alerted) > 50000:
+                alerted.clear()
+        except Exception as e:
+            print("loop err", e)
         time.sleep(5)
+
+
+if __name__ == "__main__":
+    threading.Thread(target=main, daemon=True).start()
+    web.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
