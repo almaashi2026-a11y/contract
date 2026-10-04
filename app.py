@@ -10,13 +10,13 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-REFRESH = 2                    # تحديث خارق كل ثانيتين فقط لرصد الجديد فوراً
-CALL_GAP = 0.1                 # تقليل الفاصل بين الطلبات إلى الحد الأقصى المسموح
+REFRESH = 1                    # تحديث كل ثانية واحدة بالضبط
+CALL_GAP = 0.05                # إلغاء أي انتظار بين الطلبات لأقصى سرعة ممكنة
 
 alerted_pools = set()
 recent_alerts = []             
 _last = [0.0]
-last_status = "Starting Ultra-Fast Mode..."
+last_status = "Initializing Real-Time Engine..."
 
 web = Flask(__name__)
 
@@ -25,11 +25,11 @@ HTML_TEMPLATE = """
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Debot Ultra-Fast 1-Second Tracker</title>
-    <meta http-equiv="refresh" content="3">
+    <title>Debot True 1-Second Sniper Tracker</title>
+    <meta http-equiv="refresh" content="2">
     <style>
-        body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
-        h1 { color: #ff7b72; text-align: center; margin-bottom: 5px; }
+        body { background-color: #0b0f15; color: #e6edf3; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
+        h1 { color: #f85149; text-align: center; margin-bottom: 5px; }
         .subtitle { text-align: center; color: #8b949e; margin-bottom: 25px; font-size: 0.95em; }
         .stats { background: #161b22; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; justify-content: space-around; border: 1px solid #30363d; flex-wrap: wrap; gap: 10px; }
         .stats div { font-size: 1.05em; }
@@ -40,7 +40,7 @@ HTML_TEMPLATE = """
         tr:hover { background: #1f242c; }
         a { color: #58a6ff; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .badge { background: #ff7b7233; color: #ff7b72; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #ff7b7266; }
+        .badge { background: #f8514933; color: #f85149; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #f8514966; }
         .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
         .copy-btn:hover { background: #30363d; color: #79c0ff; }
         .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
@@ -48,23 +48,23 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>🔥 رادار السرعة القصوى (Ultra-Fast First-Second Tracker)</h1>
-    <div class="subtitle">رصد البولات والصفقات في أسرع استجابة ممكنة لحظة بلحظة</div>
+    <h1>⚡ رادار القنص الفوري (True First-Second Sniper)</h1>
+    <div class="subtitle">رصد وتحديث مباشر بأقصى سرعة ممكنة فور ظهور التوكن</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي الرصد الفوري: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي العملات المرصودة: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول الرصد اللحظي الفائق:</h2>
+    <h2>📊 جدول الرصد الفوري (أول الثواني):</h2>
     <table>
         <thead>
             <tr>
-                <th>الوقت</th>
+                <th>وقت الرصد الدقيق</th>
                 <th>الشبكة</th>
                 <th>التوكن</th>
-                <th>القيمة السوقية</th>
+                <th>القيمة السوقية (FDV)</th>
                 <th>السيولة</th>
                 <th>عقد التوكن (CA)</th>
                 <th>أدوات الفحص والتحليل</th>
@@ -91,7 +91,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري الرصد الخارق بأقصى سرعة... انتظر ظهور أحدث العملات والبولات.</td>
+                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري المسح الفوري اللحظي... انتظر ظهور أحدث الإطلاقات في أول ثانية.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -136,14 +136,14 @@ def health():
     return f"OK - {last_status} | Alerts: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM ULTRA ALERT]:", msg[:60])
+    print("[TELEGRAM SNIPER ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
         return
     try:
         requests.post(
             f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
             json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML"},
-            timeout=5
+            timeout=3
         )
     except Exception as e:
         print("[!] Telegram error:", e)
@@ -154,10 +154,13 @@ def gt(path, **p):
         time.sleep(wait)
     _last[0] = time.time()
     try:
-        r = requests.get(f"https://api.geckoterminal.com/api/v2{path}", params=p, timeout=5,
-                         headers={"Accept": "application/json;version=20230302"})
+        r = requests.get(f"https://api.geckoterminal.com/api/v2{path}", params=p, timeout=4,
+                         headers={
+                             "Accept": "application/json;version=20230302",
+                             "Cache-Control": "no-cache"
+                         })
         if r.status_code == 429:
-            time.sleep(2)
+            time.sleep(1)
             return None
         return r.json()
     except Exception as e:
@@ -165,14 +168,15 @@ def gt(path, **p):
 
 def main_loop():
     global last_status, recent_alerts
-    print("[*] Ultra-Fast Tracker started.")
-    tg("🔥 **رادار السرعة القصوى (1-Second Mode) بدأ العمل!**")
+    print("[*] True 1-Second Sniper Tracker started.")
+    tg("⚡ **رادار القنص الفوري (First-Second Engine) بدأ العمل!**")
     
     while True:
         try:
             for net in NETWORKS:
-                last_status = f"رصد فائق لشبكة {net.upper()}..."
-                j = gt(f"/networks/{net}/new_pools")
+                last_status = f"مسح لحظي لشبكة {net.upper()}..."
+                # جلب أحدث البولات مباشرة بدون كاش
+                j = gt(f"/networks/{net}/new_pools", page=1)
                 items = (j or {}).get("data", [])
                 
                 for x in items:
@@ -197,7 +201,7 @@ def main_loop():
                         pass
 
                     alert_item = {
-                        "time": datetime.now().strftime("%H:%M:%S.strftime"), # الوقت بالثواني الدقيقة
+                        "time": datetime.now().strftime("%H:%M:%S"),
                         "net": net.upper(),
                         "net_raw": net,
                         "name": name,
@@ -206,15 +210,13 @@ def main_loop():
                         "token": token,
                         "pool_addr": addr
                     }
-                    # تصحيح عرض الوقت بدقة الثواني
-                    alert_item["time"] = datetime.now().strftime("%H:%M:%S")
-
+                    
                     recent_alerts.insert(0, alert_item)
-                    if len(recent_alerts) > 50:
+                    if len(recent_alerts) > 60:
                         recent_alerts.pop()
                     
                     msg = (
-                        f"🔥⚡ <b>رصد فوري خارق (Ultra-Fast 1s)</b>\n\n"
+                        f"⚡🎯 <b>رصد قنص فوري (First-Second)</b>\n\n"
                         f"🌐 الشبكة: {net.upper()}\n"
                         f"🪙 التوكن: {html.escape(name)}\n"
                         f"💧 السيولة: ${liq:,.0f}\n"
@@ -224,12 +226,12 @@ def main_loop():
                     )
                     tg(msg)
             
-            last_status = "يعمل بأقصى سرعة (Ultra-Fast)..."
+            last_status = "يعمل بكفاءة فائقة (1-Second Mode)..."
             time.sleep(REFRESH)
             
         except Exception as e:
-            last_status = f"إعادة محاولة سريعة..."
-            time.sleep(2)
+            last_status = "إعادة ضبط الاتصال السريع..."
+            time.sleep(1)
 
 if __name__ == "__main__":
     t = threading.Thread(target=main_loop, daemon=True)
