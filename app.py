@@ -14,25 +14,23 @@ NETWORKS = os.environ.get(
     "NETWORKS", "solana,base,eth,bsc,arbitrum,polygon_pos,avax,ronin,tron"
 ).split(",")
 
-MIN_WINS = int(os.environ.get("MIN_WINS", "2"))        # عدد الانتصارات لاعتماد المحفظة كذكية
-PUMP_X = 3.0                  # نسبة الصعود المطلوب لاحتساب الصفقة انتصاراً
+MIN_WINS = int(os.environ.get("MIN_WINS", "2"))        # الانتصارات المطلوبة لاعتماد المحفظة كذكية
+PUMP_X = 3.0                  # نسبة الصعود المطلوب لاحتساب الصفقة ناجحة
 MIN_WIN_USD = 50              # الحد الأدنى لشراء الفوز
 MIN_BUY_USD = 40              # أقل مبلغ شراء يطلق التنبيه الفوري
-MIN_LIQ = 3000                # أقل سيولة مقبولة للبول
-PER_NET = int(os.environ.get("PER_NET", "20"))        # عدد البولات المرصودة لكل شبكة
-ALERT_WINDOW = 300            # نافذة زمنية فورية بالثواني
-REFRESH = 180                 # تحديث البولات النشطة
-CALL_GAP = 1.5                # الفاصل الزمني للطلبات لضمان السرعة
-BOARD_FILE = "board_instant.json"
+MIN_LIQ = 4000                # السيولة الأدنى للبول ($4000)
+MAX_MC = 300000               # أقصى قيمة سوقية (MC) للدخول المبكر قبل الانفجار
+PER_NET = int(os.environ.get("PER_NET", "25"))        # عدد البولات المرصودة لكل شبكة
+ALERT_WINDOW = 180            # نافذة زمنية قصيرة جداً للرصد اللحظي (مثل توقيت 1m)
+REFRESH = 120                 # تحديث سريع للبولات النشطة
+CALL_GAP = 1.2                # فاصل زمني سريع لضمان استجابة لحظية
+BOARD_FILE = "board_debot_style.json"
 
 GT = "https://api.geckoterminal.com/api/v2"
 DEX = {"eth": "ethereum", "polygon_pos": "polygon", "avax": "avalanche"}
-GOPLUS = {"eth": 1, "bsc": 56, "base": 8453, "arbitrum": 42161,
-          "polygon_pos": 137, "avax": 43114}
 
-board = {}                   # قاعدة بيانات المحافظ والانتصارات
-alerted = set()              # منع التكرار الفوري
-sec_cache = {}               # ذاكرة مؤقتة للأمان
+board = {}                   # قاعدة بيانات المحافظ الرابحة
+alerted = set()              # منع تكرار التنبيهات
 _last = [0.0]
 
 # تحميل السجلات السابقة
@@ -46,7 +44,7 @@ web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "⚡ Smart Money Radar Pro is Active!"
+    return "⚡ Debot Style Smart Money Radar is Active!"
 
 @web.route("/health")
 def health():
@@ -79,7 +77,7 @@ def gt(path, **p):
         r = requests.get(GT + path, params=p, timeout=12,
                          headers={"Accept": "application/json;version=20230302"})
         if r.status_code == 429:
-            time.sleep(20)
+            time.sleep(15)
             return None
         r.raise_for_status()
         return r.json()
@@ -102,15 +100,19 @@ def refresh_pools():
             for x in (j or {}).get("data", []):
                 a = x["attributes"]
                 liq = float(a.get("reserve_in_usd") or 0)
-                if liq < MIN_LIQ:
+                mc = float(a.get("fdv_usd") or 0)
+                
+                # تطبيق فلاتر Debot لاستهداف العملات ذات السيولة المقبولة والقيمة السوقية المنخفضة مبكراً
+                if liq < MIN_LIQ or (0 < mc > MAX_MC):
                     continue
+                    
                 addr = a["address"]
                 pools[addr] = {
                     "net": net,
                     "addr": addr,
                     "name": a.get("name", "?"),
                     "liq": liq,
-                    "fdv": float(a.get("fdv_usd") or 0),
+                    "mc": mc,
                     "created": a.get("pool_created_at"),
                     "vol": float((a.get("volume_usd") or {}).get("h1") or 0)
                 }
@@ -124,21 +126,20 @@ def is_smart(key):
 def alert(p, w, token, usd, price):
     net = p["net"].upper()
     token_name = html.escape(p['name'])
-    fdv_val = f"${p['fdv']:,.1f}" if p['fdv'] > 0 else "غير متوفر"
+    mc_val = f"${p['mc']:,.0f}" if p['mc'] > 0 else "غير متوفر"
     
-    # القالب الاحترافي الذي طلبته تماماً
     msg = (
-        f"🚨🔥 <b>تم رصد انفجار لحظي واشتعال الزخم ({net})</b>\n"
-        f"🎯 <b>صفقة واحدة في اليوم - دخول احترافي مع الحيتان</b>\n\n"
+        f"🚨🔥 <b>رصد إشارة دخول مبكرة (طريقة Debot)</b>\n"
+        f"🎯 <b>تتبع المحافظ الرابحة - توقيت دقيق قبل الصعود</b>\n\n"
         f"🌐 <b>السلسلة:</b> {net}\n"
         f"🪙 <b>التوكن:</b> {token_name}\n"
-        f"🚀 <b>FDV:</b> {fdv_val}\n"
+        f"🚀 <b>القيمة السوقية (MC):</b> {mc_val}\n"
         f"💧 <b>السيولة الحقيقية:</b> ${p['liq']:,.0f}\n"
         f"💰 <b>قيمة الشراء المرصودة:</b> ${usd:,.0f} @ ${price:.8g}\n\n"
         f"🔑 <b>العقد (CA):</b>\n"
         f"<code>{token}</code>\n\n"
-        f"👛 <b>المحفظة الذكية:</b> <code>{w}</code>\n\n"
-        f"🛡️ <b>فحص الحيتان والتنفيذ السريع:</b>\n"
+        f"👛 <b>المحفظة الرابحة:</b> <code>{w}</code>\n\n"
+        f"🛡️ <b>أدوات التحليل السريع:</b>\n"
         f"🫧 <a href='https://bubblemaps.io'>فحص المحافظ BubbleMaps</a>\n"
         f"📊 <a href='https://defined.fi'>Defined.fi</a>\n"
         f"⚡ <a href='https://www.okx.com/web3'>شراء OKX DEX</a>\n"
@@ -177,7 +178,7 @@ def scan_pool(p):
             continue
         key = f"{net}:{w}"
         
-        # الرصد الفوري للمال الذكي
+        # الرصد اللحظي الفوري فور دخول المحفظة الذكية
         if (now - ts <= ALERT_WINDOW and usd >= MIN_BUY_USD and is_smart(key)
                 and (key, token) not in alerted):
             alerted.add((key, token))
@@ -186,13 +187,13 @@ def scan_pool(p):
         if w not in firsts:
             firsts[w] = (i, usd, price, token)
             
-    # تحديث الأرباح في الخلفية لتطوير الأداء المستقبلي للمحافظ
+    # تحديث الأرباح للمحافظ في الخلفية لتصنيفها بدقة
     for w, (i, usd, price, token) in firsts.items():
         if usd >= MIN_WIN_USD and sufmax[i] / price >= PUMP_X:
             board.setdefault(f"{net}:{w}", {"wins": {}})["wins"][token] = now
 
 def main():
-    tg("⚡ **رادار المال الذكي جاهز ويرسل بالنسخة الاحترافية المخصصة!**")
+    tg("⚡ **رادار Debot الذكي تم تفعيله ويرصد الفرص المبكرة الآن!**")
     queue, last = [], 0
     while True:
         try:
@@ -208,7 +209,7 @@ def main():
                 alerted.clear()
         except Exception as e:
             print("Main loop error:", e)
-        time.sleep(3)
+        time.sleep(2.5)
 
 if __name__ == "__main__":
     threading.Thread(target=main, daemon=True).start()
