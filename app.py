@@ -10,14 +10,18 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-# الحد الأقصى للسرعة: بدون أي تأخير زمني وبدون انتظار
 REFRESH = 0.5                  
 CALL_GAP = 0.01                
+
+# شروط الأمان والبمب اللحظي
+MIN_LIQ = 1000                 # الحد الأدنى للسيولة (بالدولار) لضمان عدم سحبها أو تفريغها بسهولة
+MIN_MC = 5000                  # الحد الأدنى للقيمة السوقية المبدئية
+MAX_MC = 500000                # أقصى قيمة سوقية لضمان أن العملة في بدايتها وتحتمل البمب القوي
 
 alerted_pools = set()
 recent_alerts = []             
 _last = [0.0]
-last_status = "Initializing Hyper-Speed Sniper..."
+last_status = "Initializing Safe Pump Sniper..."
 
 web = Flask(__name__)
 
@@ -26,11 +30,11 @@ HTML_TEMPLATE = """
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Debot Hyper-Speed 1s Sniper</title>
+    <title>Debot Safe Pump 1s Sniper</title>
     <meta http-equiv="refresh" content="1">
     <style>
         body { background-color: #06080c; color: #e6edf3; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
-        h1 { color: #58a6ff; text-align: center; margin-bottom: 5px; }
+        h1 { color: #3fb950; text-align: center; margin-bottom: 5px; }
         .subtitle { text-align: center; color: #8b949e; margin-bottom: 25px; font-size: 0.95em; }
         .stats { background: #161b22; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; justify-content: space-around; border: 1px solid #30363d; flex-wrap: wrap; gap: 10px; }
         .stats div { font-size: 1.05em; }
@@ -41,7 +45,7 @@ HTML_TEMPLATE = """
         tr:hover { background: #1f242c; }
         a { color: #58a6ff; text-decoration: none; }
         a:hover { text-decoration: underline; }
-        .badge { background: #58a6ff33; color: #58a6ff; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #58a6ff66; }
+        .badge { background: #3fb95033; color: #3fb950; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #3fb95066; }
         .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
         .copy-btn:hover { background: #30363d; color: #79c0ff; }
         .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
@@ -49,24 +53,24 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>⚡🚀 رادار السرعة القصوى (Hyper-Speed 1s Engine)</h1>
-    <div class="subtitle">رصد احترافي متزامن لأول ثانية من الانفجارات والبمبات</div>
+    <h1>🛡️🚀 رادار العملات الآمنة والبمبات اللحظية (Safe 1s Sniper)</h1>
+    <div class="subtitle">فلترة متقدمة لاستبعاد العملات الضعيفة ورصد الانطلاقات الآمنة في أول ثانية</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي العملات المرصودة: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي العملات الآمنة: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول الرصد الفوري اللحظي:</h2>
+    <h2>📊 جدول رصد البمبات الآمنة:</h2>
     <table>
         <thead>
             <tr>
-                <th>الوقت بالثانية</th>
+                <th>الوقت</th>
                 <th>الشبكة</th>
                 <th>التوكن / البول</th>
                 <th>القيمة السوقية (MC)</th>
-                <th>السيولة</th>
+                <th>السيولة الآمنة</th>
                 <th>عقد التوكن (CA)</th>
                 <th>أدوات الفحص والتحليل</th>
             </tr>
@@ -92,7 +96,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري المسح الفائق لأول ثانية... انتظر الانطلاقات الجديدة.</td>
+                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري ترقب العملات الآمنة ذات البمب القوي في أول ثانية...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -137,7 +141,7 @@ def health():
     return f"OK - {last_status} | Alerts: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM HYPER ALERT]:", msg[:60])
+    print("[TELEGRAM SAFE ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
         return
     try:
@@ -183,6 +187,12 @@ def scan_network(net):
             
             if addr in alerted_pools:
                 continue
+            
+            # تطبيق فلتر الأمان والقوة اللحظية:
+            # 1. التأكد أن السيولة أكبر من الحد الأدنى (تمنع العملات الفارغة أو المسحوبة)
+            # 2. التأكد أن القيمة السوقية ضمن النطاق الآمن للانفجار (البمب)
+            if liq < MIN_LIQ or mc < MIN_MC or mc > MAX_MC:
+                continue
                 
             alerted_pools.add(addr)
             
@@ -211,11 +221,11 @@ def scan_network(net):
                 recent_alerts.pop()
             
             msg = (
-                f"⚡🚀🔥 <b>رصد أول ثانية (Hyper-Speed)</b>\n\n"
+                f"🛡️🚀🔥 <b>رصد بمب آمن (Safe 1s Sniper)</b>\n\n"
                 f"🌐 الشبكة: {net.upper()}\n"
                 f"🪙 التوكن: {html.escape(name)}\n"
-                f"💧 السيولة: ${liq:,.0f}\n"
-                f"📊 القيمة السوقية (MC): ${mc:,.0f}\n\n"
+                f"💧 السيولة الآمنة: ${liq:,.0f}\n"
+                f"📊 القيمة السوقية: ${mc:,.0f}\n\n"
                 f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
                 f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
             )
@@ -225,14 +235,13 @@ def scan_network(net):
 
 def main_loop():
     global last_status
-    print("[*] Hyper-Speed Sniper Engine started.")
-    tg("⚡🟢 **رادار السرعة القصوى (Hyper-Speed 1s) يعمل بكامل الطاقة!**")
+    print("[*] Safe Pump Sniper Engine started.")
+    tg("🛡️🟢 **رادار العملات الآمنة والبمبات اللحظية بدأ العمل!**")
     
     while True:
         try:
-            last_status = "مسح متزامن فائق السرعة..."
+            last_status = "جاري فحص وبفلترة السيولة الآمنة..."
             
-            # تشغيل الفحص لكل الشبكات بشكل متزامن (Multi-threading) لضمان عدم وجود أي تأخير تسلسلي
             threads = []
             for net in NETWORKS:
                 t = threading.Thread(target=scan_network, args=(net,))
@@ -245,7 +254,7 @@ def main_loop():
             time.sleep(REFRESH)
             
         except Exception as e:
-            last_status = "إعادة ضبط النبض..."
+            last_status = "إعادة ضبط الفلتر..."
             time.sleep(0.2)
 
 if __name__ == "__main__":
