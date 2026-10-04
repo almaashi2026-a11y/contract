@@ -5,32 +5,34 @@ import html
 import threading
 import requests
 from datetime import datetime
+from collections import defaultdict
 from flask import Flask
 
-# الإعدادات الأساسية
+# الإعدادات الاحترافية المتقدمة
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get(
     "NETWORKS", "solana,base,eth,bsc,arbitrum,polygon_pos,avax,ronin,tron"
 ).split(",")
 
-MIN_WINS = int(os.environ.get("MIN_WINS", "2"))        # الانتصارات المطلوبة لاعتماد المحفظة كذكية
-PUMP_X = 3.0                  # نسبة الصعود المطلوب لاحتساب الصفقة ناجحة
-MIN_WIN_USD = 50              # الحد الأدنى لشراء الفوز
-MIN_BUY_USD = 40              # أقل مبلغ شراء يطلق التنبيه الفوري
-MIN_LIQ = 4000                # السيولة الأدنى للبول ($4000)
-MAX_MC = 300000               # أقصى قيمة سوقية (MC) للدخول المبكر قبل الانفجار
-PER_NET = int(os.environ.get("PER_NET", "25"))        # عدد البولات المرصودة لكل شبكة
-ALERT_WINDOW = 180            # نافذة زمنية قصيرة جداً للرصد اللحظي (مثل توقيت 1m)
-REFRESH = 120                 # تحديث سريع للبولات النشطة
-CALL_GAP = 1.2                # فاصل زمني سريع لضمان استجابة لحظية
-BOARD_FILE = "board_debot_style.json"
+MIN_WINS = int(os.environ.get("MIN_WINS", "3"))        # معيار صارم: 3 انتصارات سابقة مثبتة للمحفظة
+PUMP_X = 3.2                  # نسبة الصعود الأدنى لاحتساب الصفقة انتصاراً (3.2x)
+MIN_WIN_USD = 80              # الحد الأدنى لحجم شراء الفوز للتأكد من قوة رأس مال المحفظة
+MIN_BUY_USD = 50              # أقل مبلغ شراء يسمح بإطلاق التنبيه الفوري
+MIN_LIQ = 5000                # السيولة الأدنى للبول ($5000) لضمان عمق السوق
+MAX_MC = 250000               # الحد الأقصى للقيمة السوقية (MC) لاستهداف العملات المبكرة جداً
+MAX_WALLET_TRADES = 25        # استبعاد البوتات الآلية والمحافظ التي تداول بجنون (Spam)
+PER_NET = int(os.environ.get("PER_NET", "30"))        # عدد البولات المرصودة لكل شبكة لزيادة الشمول
+ALERT_WINDOW = 120            # نافذة زمنية فائقة القصر (دقيقتان) لضمان الدخول قبل الصعود
+REFRESH = 100                 # تحديث سريع للبولات والاتجاهات
+CALL_GAP = 1.0                # أقصى سرعة ممكنة للطلبات مع حماية الكود من الحظر
+BOARD_FILE = "board_elite_pro.json"
 
 GT = "https://api.geckoterminal.com/api/v2"
 DEX = {"eth": "ethereum", "polygon_pos": "polygon", "avax": "avalanche"}
 
-board = {}                   # قاعدة بيانات المحافظ الرابحة
-alerted = set()              # منع تكرار التنبيهات
+board = {}                   # قاعدة بيانات المحافظ النخبة
+alerted = set()              # منع تكرار التنبيهات لنفس العملة ونفس المحفظة
 _last = [0.0]
 
 # تحميل السجلات السابقة
@@ -44,12 +46,12 @@ web = Flask(__name__)
 
 @web.route("/")
 def home():
-    return "⚡ Debot Style Smart Money Radar is Active!"
+    return "🚀 Elite Smart Money & Debot Radar is Running!"
 
 @web.route("/health")
 def health():
-    smart_count = sum(1 for v in board.values() if len(v.get("wins", {})) >= MIN_WINS)
-    return f"Status: OK | Tracked Wallets: {len(board)} | Confirmed Smart: {smart_count}"
+    elite_count = sum(1 for v in board.values() if len(v.get("wins", {})) >= MIN_WINS)
+    return f"Status: OK | Total Wallets: {len(board)} | Elite Smart Wallets: {elite_count}"
 
 def tg(msg):
     if not TG_TOKEN or not TG_CHAT:
@@ -102,7 +104,7 @@ def refresh_pools():
                 liq = float(a.get("reserve_in_usd") or 0)
                 mc = float(a.get("fdv_usd") or 0)
                 
-                # تطبيق فلاتر Debot لاستهداف العملات ذات السيولة المقبولة والقيمة السوقية المنخفضة مبكراً
+                # فلاتر النخبة: سيولة ممتازة وقيمة سوقية منخفضة للدخول قبل الانفجار
                 if liq < MIN_LIQ or (0 < mc > MAX_MC):
                     continue
                     
@@ -120,26 +122,29 @@ def refresh_pools():
         out.extend(top)
     return out
 
-def is_smart(key):
+def is_elite_smart(key):
     return len(board.get(key, {}).get("wins", {})) >= MIN_WINS
 
 def alert(p, w, token, usd, price):
     net = p["net"].upper()
     token_name = html.escape(p['name'])
     mc_val = f"${p['mc']:,.0f}" if p['mc'] > 0 else "غير متوفر"
+    wins_count = len(board[f"{net.lower()}:{w}"].get("wins", {}))
     
     msg = (
-        f"🚨🔥 <b>رصد إشارة دخول مبكرة (طريقة Debot)</b>\n"
-        f"🎯 <b>تتبع المحافظ الرابحة - توقيت دقيق قبل الصعود</b>\n\n"
+        f"🚨🔥 <b>رصد نخبة المال الذكي (دخول احترافي مبكر)</b>\n"
+        f"🎯 <b>اقتناص الصفقة قبل الانفجار السعري الكبير</b>\n\n"
         f"🌐 <b>السلسلة:</b> {net}\n"
         f"🪙 <b>التوكن:</b> {token_name}\n"
         f"🚀 <b>القيمة السوقية (MC):</b> {mc_val}\n"
         f"💧 <b>السيولة الحقيقية:</b> ${p['liq']:,.0f}\n"
-        f"💰 <b>قيمة الشراء المرصودة:</b> ${usd:,.0f} @ ${price:.8g}\n\n"
+        f"💰 <b>قيمة الشراء المرصودة:</b> ${usd:,.0f} @ ${price:.8g}\n"
+        f"🏆 <b>سجل نجاح المحفظة:</b> {wins_count} انتصارات موثقة\n\n"
         f"🔑 <b>العقد (CA):</b>\n"
         f"<code>{token}</code>\n\n"
-        f"👛 <b>المحفظة الرابحة:</b> <code>{w}</code>\n\n"
-        f"🛡️ <b>أدوات التحليل السريع:</b>\n"
+        f"👛 <b>المحفظة الذكية:</b> <code>{w}</code>\n\n"
+        f"🛡️ <b>أدوات الفحص والتنفيذ السريع:</b>\n"
+        f"🤖 <a href='https://debots.io'>تنفيذ ومتابعة عبر Debot</a>\n"
         f"🫧 <a href='https://bubblemaps.io'>فحص المحافظ BubbleMaps</a>\n"
         f"📊 <a href='https://defined.fi'>Defined.fi</a>\n"
         f"⚡ <a href='https://www.okx.com/web3'>شراء OKX DEX</a>\n"
@@ -172,14 +177,18 @@ def scan_pool(p):
         m = max(m, rows[i][4])
         sufmax[i] = m
         
+    cnt = defaultdict(int)
+    for r in rows:
+        cnt[r[1]] += 1
+        
     now, firsts = time.time(), {}
     for i, (ts, w, buy, usd, price, token) in enumerate(rows):
         if not buy or price <= 0:
             continue
         key = f"{net}:{w}"
         
-        # الرصد اللحظي الفوري فور دخول المحفظة الذكية
-        if (now - ts <= ALERT_WINDOW and usd >= MIN_BUY_USD and is_smart(key)
+        # الرصد الاحترافي الفوري للمحافظ النخبة ضمن النافذة الزمنية الضيقة
+        if (now - ts <= ALERT_WINDOW and usd >= MIN_BUY_USD and is_elite_smart(key)
                 and (key, token) not in alerted):
             alerted.add((key, token))
             alert(p, w, token, usd, price)
@@ -187,13 +196,14 @@ def scan_pool(p):
         if w not in firsts:
             firsts[w] = (i, usd, price, token)
             
-    # تحديث الأرباح للمحافظ في الخلفية لتصنيفها بدقة
+    # تحديث وتصنيف أداء المحافظ بدقة عالية في الخلفية
     for w, (i, usd, price, token) in firsts.items():
-        if usd >= MIN_WIN_USD and sufmax[i] / price >= PUMP_X:
+        if (usd >= MIN_WIN_USD and cnt[w] <= MAX_WALLET_TRADES
+                and sufmax[i] / price >= PUMP_X):
             board.setdefault(f"{net}:{w}", {"wins": {}})["wins"][token] = now
 
 def main():
-    tg("⚡ **رادار Debot الذكي تم تفعيله ويرصد الفرص المبكرة الآن!**")
+    tg("⚡ **رادار النخبة الاحترافي مع ربط Debot جاهز للعمل!**")
     queue, last = [], 0
     while True:
         try:
@@ -209,7 +219,7 @@ def main():
                 alerted.clear()
         except Exception as e:
             print("Main loop error:", e)
-        time.sleep(2.5)
+        time.sleep(2)
 
 if __name__ == "__main__":
     threading.Thread(target=main, daemon=True).start()
