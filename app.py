@@ -10,32 +10,31 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-MIN_BUY_USD = 10               # الحد الأدنى لشراء المحفظة لإطلاق التنبيه
-MIN_LIQ = 500                  
+MIN_BUY_USD = 1000             # تم رفع الحد الأدنى إلى 1000 دولار للتركيز على الشراء القوي والحيتان فقط
+MIN_LIQ = 1000                 # رفع الحد الأدنى للسيولة لتجنب التوكنات الضعيفة
 MAX_MC = 10000000              
 REFRESH = 15                   
 CALL_GAP = 1.0
 
 alerted = set()
-recent_alerts = []             # تخزين الصفقات والنتائج لعرضها مباشرة على الصفحة
+recent_alerts = []             
 _last = [0.0]
 last_status = "Starting..."
 
 web = Flask(__name__)
 
-# قالب صفحة الويب الاحترافية لعرض النتائج والتفاصيل مباشرة
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Debot Live Wallet Tracker - لوحة النتائج</title>
+    <title>Debot Live Whale Tracker - لوحة رادار الحيتان</title>
     <meta http-equiv="refresh" content="10">
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
         h1 { color: #58a6ff; text-align: center; margin-bottom: 5px; }
         .subtitle { text-align: center; color: #8b949e; margin-bottom: 25px; font-size: 0.95em; }
-        .stats { background: #161b22; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; justify-content: space-around; border: 1px solid #30363d; }
+        .stats { background: #161b22; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; justify-content: space-around; border: 1px solid #30363d; flex-wrap: wrap; gap: 10px; }
         .stats div { font-size: 1.05em; }
         .stats span { color: #3fb950; font-weight: bold; }
         table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
@@ -45,28 +44,30 @@ HTML_TEMPLATE = """
         a { color: #58a6ff; text-decoration: none; }
         a:hover { text-decoration: underline; }
         .badge { background: #1f6feb33; color: #58a6ff; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #1f6feb66; }
-        code { background: #0d1117; padding: 2px 6px; border-radius: 4px; color: #f0883e; font-family: monospace; }
-        .price { color: #3fb950; font-weight: bold; }
+        .copy-btn { background: #21262d; color: #f0883e; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
+        .copy-btn:hover { background: #30363d; color: #ffa657; }
+        .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: #fff; padding: 10px 20px; border-radius: 6px; display: none; font-weight: bold; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
     </style>
 </head>
 <body>
-    <h1>🚀 لوحة رادار Debot لتتبع المحافظ والصفقات</h1>
-    <div class="subtitle">تحديث تلقائي مباشر للصفحة كل 10 ثوانٍ</div>
+    <h1>🚀 لوحة رادار Debot للحيتان والصفقات الكبرى</h1>
+    <div class="subtitle">مصفى على الصفقات التي تبدأ من $1,000 فصاعداً (تحديث تلقائي كل 10 ثوانٍ)</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي الصفقات المرصودة: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي الصفقات الكبرى: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول الصفقات والمحافظ اللحظية:</h2>
+    <h2>📊 جدول صفقات الحيتان والمحافظ الثقيلة:</h2>
     <table>
         <thead>
             <tr>
                 <th>الوقت</th>
                 <th>الشبكة</th>
                 <th>التوكن</th>
-                <th>حجم الشراء</th>
+                <th>حجم الشراء القوي</th>
                 <th>السيولة</th>
                 <th>المحفظة</th>
                 <th>العقد (CA)</th>
@@ -81,8 +82,16 @@ HTML_TEMPLATE = """
                 <td><strong>{{ item.name }}</strong></td>
                 <td class="price">${{ "{:,.0f}".format(item.usd) }}</td>
                 <td>${{ "{:,.0f}".format(item.liq) }}</td>
-                <td><code>{{ item.wallet[:6] }}...{{ item.wallet[-4:] }}</code></td>
-                <td><code>{{ item.token[:6] }}...{{ item.token[-4:] }}</code></td>
+                <td>
+                    <button class="copy-btn" onclick="copyText('{{ item.wallet }}', 'تم نسخ عنوان المحفظة!')" title="انقر لنسخ المحفظة">
+                        {{ item.wallet[:6] }}...{{ item.wallet[-4:] }} 📋
+                    </button>
+                </td>
+                <td>
+                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ عقد التوكن (CA)!')" title="انقر لنسخ العقد">
+                        {{ item.token[:6] }}...{{ item.token[-4:] }} 📋
+                    </button>
+                </td>
                 <td>
                     <a href="https://debots.io" target="_blank">Debot</a> | 
                     <a href="https://bubblemaps.io" target="_blank">BubbleMaps</a> | 
@@ -91,11 +100,32 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" style="text-align: center; color: #8b949e; padding: 30px;">جاري فحص البولات والشبكات وسيتم عرض النتائج هنا فور رصد أول صفقة... انتظر قليلاً.</td>
+                <td colspan="8" style="text-align: center; color: #8b949e; padding: 30px;">جاري ترصد الصفقات الكبرى ($1000+) في البولات... انتظر قليلاً لحين رصد أول حوت.</td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+
+    <div id="toast">تم النسخ بنجاح!</div>
+
+    <script>
+        function copyText(text, message) {
+            navigator.clipboard.writeText(text).then(function() {
+                showToast(message);
+            }, function(err) {
+                console.error('فشل النسخ: ', err);
+            });
+        }
+
+        function showToast(msg) {
+            var toast = document.getElementById("toast");
+            toast.innerText = msg;
+            toast.style.display = "block";
+            setTimeout(function() {
+                toast.style.display = "none";
+            }, 2000);
+        }
+    </script>
 </body>
 </html>
 """
@@ -112,10 +142,10 @@ def home():
 
 @web.route("/health")
 def health():
-    return f"OK - {last_status} | Alerts count: {len(recent_alerts)}"
+    return f"OK - {last_status} | Whale Alerts: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM ALERT]:", msg[:60])
+    print("[TELEGRAM WHALE ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
         print("[!] Telegram credentials missing!")
         return
@@ -146,14 +176,14 @@ def gt(path, **p):
 
 def main_loop():
     global last_status, recent_alerts
-    print("[*] Debot Dashboard & Tracker started.")
-    tg("⚡ **رادار Debot ولوحة التحكم المباشرة بدآ العمل بنجاح!**")
+    print("[*] Debot Whale Tracker started.")
+    tg("🐋 **رادار تتبع الحيتان والصفقات الكبرى ($1000+) بدأ العمل بنجاح!**")
     
     while True:
         try:
             total_checked = 0
             for net in NETWORKS:
-                last_status = f"جاري فحص شبكة {net.upper()}..."
+                last_status = f"جاري فحص شبكة {net.upper()} للحيتان..."
                 j = gt(f"/networks/{net}/trending_pools")
                 items = (j or {}).get("data", [])
                 
@@ -179,10 +209,10 @@ def main_loop():
                             token = ta.get("to_token_address")
                             wallet = ta.get("tx_from_address")
                             
+                            # الفلترة الصارمة للصفقات الكبرى فقط
                             if usd >= MIN_BUY_USD and wallet and (wallet, token) not in alerted:
                                 alerted.add((wallet, token))
                                 
-                                # إضافة النتيجة إلى قائمة لوحة التحكم المباشرة
                                 alert_item = {
                                     "time": datetime.now().strftime("%H:%M:%S"),
                                     "net": net.upper(),
@@ -195,24 +225,23 @@ def main_loop():
                                     "pool_addr": addr
                                 }
                                 recent_alerts.insert(0, alert_item)
-                                if len(recent_alerts) > 50:  # الاحتفاظ بأحدث 50 نتيجة فقط
+                                if len(recent_alerts) > 50:
                                     recent_alerts.pop()
                                 
-                                # إرسال التنبيه إلى تليجرام
                                 msg = (
-                                    f"🚨👛 <b>رصد شراء محفظة جديدة (Debot Tracker)</b>\n\n"
+                                    f"🐋🔥 <b>رصد صفقة حوت كبرى (Debot Whale Tracker)</b>\n\n"
                                     f"🌐 الشبكة: {net.upper()}\n"
                                     f"🪙 التوكن: {html.escape(name)}\n"
-                                    f"💰 حجم شراء المحفظة: ${usd:,.0f}\n"
+                                    f"💰 حجم الشراء القوي: <b>${usd:,.0f}</b>\n"
                                     f"💧 السيولة: ${liq:,.0f}\n\n"
                                     f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
-                                    f"👛 عنوان المحفظة:\n<code>{wallet}</code>\n\n"
+                                    f"👛 عنوان المحفظة الثقيلة:\n<code>{wallet}</code>\n\n"
                                     f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
                                 )
                                 tg(msg)
                                 break
             
-            last_status = f"يعمل بنجاح - تم فحص {total_checked} بول نشط."
+            last_status = f"يعمل بنجاح - تم فحص {total_checked} بول بحثاً عن الحيتان."
             time.sleep(REFRESH)
             
         except Exception as e:
