@@ -10,10 +10,8 @@ TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-MIN_BUY_USD = 500              # الحد الأدنى لأول عملية شراء مبكرة
-MIN_LIQ = 100                  # سيولة أولية منخفضة لضمان رصده لحظة التأسيس
-MAX_MC = 5000000               
-REFRESH = 10                   # تحديث سريع جداً لسرعة التقاط البولات الجديدة
+MIN_LIQ = 10                   # سيولة أولية منخفضة جداً لضمان عدم تفويت أي إطلاق
+REFRESH = 8                    
 CALL_GAP = 0.8
 
 alerted_pools = set()
@@ -29,7 +27,7 @@ HTML_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <title>Debot Zero-Delay Pre-Chart Tracker</title>
-    <meta http-equiv="refresh" content="8">
+    <meta http-equiv="refresh" content="6">
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
         h1 { color: #f0883e; text-align: center; margin-bottom: 5px; }
@@ -51,25 +49,24 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>⚡ رادار الاكتشاف المبكر جداً (Pre-Chart / Zero-Delay)</h1>
-    <div class="subtitle">رصد البولات والتوكنات فور إنشائها على السلاسل قبل انتشارها على الشارتات (تحديث تلقائي كل 8 ثوانٍ)</div>
+    <h1>⚡ رادار الاكتشاف المبكر اللحظي (Zero-Delay)</h1>
+    <div class="subtitle">رصد البولات والتوكنات فور ولادتها على السلاسل (تحديث تلقائي كل 6 ثوانٍ)</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي الاكتشافات المبكرة: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي الاكتشافات: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول الاكتشاف المبكر للحظات الأولى من الإطلاق:</h2>
+    <h2>📊 جدول الإطلاقات والبولات الجديدة لحظة بلحظة:</h2>
     <table>
         <thead>
             <tr>
                 <th>وقت الاكتشاف</th>
                 <th>الشبكة</th>
                 <th>التوكن</th>
-                <th>أول ضخ / شراء</th>
+                <th>القيمة السوقية (FDV)</th>
                 <th>السيولة الأولية</th>
-                <th>المحفظة المنشأة / الأولى</th>
                 <th>عقد التوكن (CA)</th>
                 <th>أدوات الفحص والتحليل</th>
             </tr>
@@ -80,13 +77,8 @@ HTML_TEMPLATE = """
                 <td>{{ item.time }}</td>
                 <td><span class="badge">{{ item.net }}</span></td>
                 <td><strong>{{ item.name }}</strong></td>
-                <td class="price">${{ "{:,.0f}".format(item.usd) }}</td>
+                <td class="price">${{ "{:,.0f}".format(item.mc) }}</td>
                 <td>${{ "{:,.0f}".format(item.liq) }}</td>
-                <td>
-                    <button class="copy-btn" onclick="copyText('{{ item.wallet }}', 'تم نسخ المحفظة!')" title="انقر لنسخ المحفظة">
-                        {{ item.wallet[:6] }}...{{ item.wallet[-4:] }} 📋
-                    </button>
-                </td>
                 <td>
                     <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ العقد!')" title="انقر لنسخ العقد">
                         {{ item.token[:6] }}...{{ item.token[-4:] }} 📋
@@ -100,7 +92,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" style="text-align: center; color: #8b949e; padding: 30px;">جاري مراقبة أحدث إطلاقات البولات على السلاسل لحظة بلحظة... انتظر ظهور أول إطلاق مبكر.</td>
+                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري رصد أحدث البولات على السلاسل... ستظهر النتائج هنا فوراً عند أول إطلاق.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -142,12 +134,11 @@ def home():
 
 @web.route("/health")
 def health():
-    return f"OK - {last_status} | Pre-Chart Alerts: {len(recent_alerts)}"
+    return f"OK - {last_status} | Alerts: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM PRE-CHART ALERT]:", msg[:60])
+    print("[TELEGRAM ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
-        print("[!] Telegram credentials missing!")
         return
     try:
         requests.post(
@@ -176,25 +167,22 @@ def gt(path, **p):
 
 def main_loop():
     global last_status, recent_alerts
-    print("[*] Pre-Chart Zero-Delay Tracker started.")
-    tg("⚡ **رادار الاكتشاف المبكر جداً (قبل الشارت) بدأ العمل بنجاح!**")
+    print("[*] Zero-Delay Tracker started.")
+    tg("⚡ **رادار الاكتشاف المبكر للبولات الجديدة بدأ العمل!**")
     
     while True:
         try:
             total_checked = 0
             for net in NETWORKS:
-                last_status = f"مراقبة أحدث إطلاقات شبكة {net.upper()}..."
-                # استدعاء أحدث البولات المنشأة على الشبكة (Newest Pools Endpoint) بدلاً من الترند المتأخر
+                last_status = f"فحص الإطلاقات الجديدة على شبكة {net.upper()}..."
                 j = gt(f"/networks/{net}/new_pools")
                 items = (j or {}).get("data", [])
                 
                 for x in items:
                     a = x["attributes"]
                     liq = float(a.get("reserve_in_usd") or 0)
+                    mc = float(a.get("fdv_usd") or 0)
                     
-                    if liq < MIN_LIQ:
-                        continue
-                        
                     addr = a["address"]
                     name = a.get("name", "?")
                     total_checked += 1
@@ -202,47 +190,42 @@ def main_loop():
                     if addr in alerted_pools:
                         continue
                         
-                    # فحص الصفقات الأولى فور إنشاء البول
-                    trades_j = gt(f"/networks/{net}/pools/{addr}/trades")
-                    trades = (trades_j or {}).get("data", [])
+                    alerted_pools.add(addr)
                     
-                    for t in trades:
-                        ta = t["attributes"]
-                        if ta.get("kind") == "buy":
-                            usd = float(ta.get("volume_in_usd") or 0)
-                            token = ta.get("to_token_address")
-                            wallet = ta.get("tx_from_address")
-                            
-                            if usd >= MIN_BUY_USD and wallet and token:
-                                alerted_pools.add(addr)
-                                
-                                alert_item = {
-                                    "time": datetime.now().strftime("%H:%M:%S"),
-                                    "net": net.upper(),
-                                    "net_raw": net,
-                                    "name": name,
-                                    "usd": usd,
-                                    "liq": liq,
-                                    "wallet": wallet,
-                                    "token": token,
-                                    "pool_addr": addr
-                                }
-                                recent_alerts.insert(0, alert_item)
-                                if len(recent_alerts) > 50:
-                                    recent_alerts.pop()
-                                
-                                msg = (
-                                    f"⚡🚀 <b>رصد إطلاق مبكر جداً (Pre-Chart / Zero-Delay)</b>\n\n"
-                                    f"🌐 الشبكة: {net.upper()}\n"
-                                    f"🪙 التوكن: {html.escape(name)}\n"
-                                    f"💰 أول حجم شراء: <b>${usd:,.0f}</b>\n"
-                                    f"💧 السيولة الأولية: ${liq:,.0f}\n\n"
-                                    f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
-                                    f"👛 محفظة الضخ الأولى:\n<code>{wallet}</code>\n\n"
-                                    f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
-                                )
-                                tg(msg)
-                                break
+                    # جلب عنوان التوكن الأساسي من علاقات البول إن وجد
+                    token = addr  # افتراضي عنوان البول في حال لم تتوفر العلاقة
+                    try:
+                        relationships = x.get("relationships", {})
+                        token_data = relationships.get("base_token", {}).get("data", {})
+                        if token_data:
+                            token = token_data.get("id", addr).split("_")[-1]
+                    except:
+                        pass
+
+                    alert_item = {
+                        "time": datetime.now().strftime("%H:%M:%S"),
+                        "net": net.upper(),
+                        "net_raw": net,
+                        "name": name,
+                        "mc": mc,
+                        "liq": liq,
+                        "token": token,
+                        "pool_addr": addr
+                    }
+                    recent_alerts.insert(0, alert_item)
+                    if len(recent_alerts) > 50:
+                        recent_alerts.pop()
+                    
+                    msg = (
+                        f"⚡🚀 <b>رصد إطلاق بول جديد (Zero-Delay)</b>\n\n"
+                        f"🌐 الشبكة: {net.upper()}\n"
+                        f"🪙 التوكن: {html.escape(name)}\n"
+                        f"💧 السيولة: ${liq:,.0f}\n"
+                        f"📊 القيمة السوقية (FDV): ${mc:,.0f}\n\n"
+                        f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
+                        f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
+                    )
+                    tg(msg)
             
             last_status = f"يعمل بكفاءة - تم فحص أحدث إطلاقات {total_checked} بول."
             time.sleep(REFRESH)
