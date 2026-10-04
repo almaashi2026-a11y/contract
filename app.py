@@ -1,44 +1,39 @@
 import os
 import time
-import json
 import html
 import threading
 import requests
-from datetime import datetime
-from collections import defaultdict
 from flask import Flask
 
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-MIN_BUY_USD = 10              
-MIN_LIQ = 500                 
-MAX_MC = 5000000              
-PER_NET = 10                  
-REFRESH = 30                  
-CALL_GAP = 1.2                
+MIN_BUY_USD = 10               # الحد الأدنى لشراء المحفظة لإطلاق التنبيه
+MIN_LIQ = 500                  
+MAX_MC = 10000000              
+REFRESH = 15                   
+CALL_GAP = 1.0
 
-board = {}
 alerted = set()
 _last = [0.0]
-last_status = "Initializing..."
+last_status = "Starting..."
 
 web = Flask(__name__)
 
 @web.route("/")
 def home():
     global last_status
-    return f"🚀 Debot Scanner Status: {last_status} | Tracked: {len(board)}"
+    return f"🚀 Debot Wallet Tracker Active | Status: {last_status} | Alerted Cache: {len(alerted)}"
 
 @web.route("/health")
 def health():
     return f"OK - {last_status}"
 
 def tg(msg):
-    print("[TG]", msg[:50])
+    print("[TELEGRAM WALLET ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
-        print("[!] Missing TG credentials")
+        print("[!] Telegram credentials missing!")
         return
     try:
         requests.post(
@@ -47,7 +42,7 @@ def tg(msg):
             timeout=10
         )
     except Exception as e:
-        print("[!] TG Error:", e)
+        print("[!] Telegram error:", e)
 
 def gt(path, **p):
     wait = CALL_GAP - (time.time() - _last[0])
@@ -58,29 +53,25 @@ def gt(path, **p):
         r = requests.get(f"https://api.geckoterminal.com/api/v2{path}", params=p, timeout=10,
                          headers={"Accept": "application/json;version=20230302"})
         if r.status_code == 429:
-            print("[!] Rate limit 429, waiting...")
             time.sleep(10)
             return None
         return r.json()
     except Exception as e:
-        print("[!] API Error on", path, ":", e)
+        print("[!] API Error:", e)
         return None
 
 def main_loop():
     global last_status
-    print("[*] Background scanner thread started successfully.")
-    tg("⚡ **رادار Debot بدأ العمل ويقوم بالفحص الآن!**")
+    print("[*] Debot Wallet-Centric Scanner started.")
+    tg("⚡ **رادار تتبع المحافظ (Debot Style) يعمل الآن!**")
     
     while True:
         try:
-            last_status = "Refreshing pools..."
-            print(f"[{datetime.now()}] Refreshing pools for networks: {NETWORKS}")
-            
             total_checked = 0
             for net in NETWORKS:
+                last_status = f"Scanning {net} wallets..."
                 j = gt(f"/networks/{net}/trending_pools")
                 items = (j or {}).get("data", [])
-                print(f" -> Network {net}: found {len(items)} trending pools")
                 
                 for x in items:
                     a = x["attributes"]
@@ -94,7 +85,6 @@ def main_loop():
                     name = a.get("name", "?")
                     total_checked += 1
                     
-                    # فحص الصفقات للبول النشط
                     trades_j = gt(f"/networks/{net}/pools/{addr}/trades")
                     trades = (trades_j or {}).get("data", [])
                     
@@ -103,29 +93,30 @@ def main_loop():
                         if ta.get("kind") == "buy":
                             usd = float(ta.get("volume_in_usd") or 0)
                             token = ta.get("to_token_address")
-                            w = ta.get("tx_from_address")
+                            wallet = ta.get("tx_from_address")  # التركيز على محفظة الشراء
                             
-                            if usd >= MIN_BUY_USD and (w, token) not in alerted:
-                                alerted.add((w, token))
+                            # منع التكرار والتركيز الأساسي على حركة المحفظة والتوكن
+                            if usd >= MIN_BUY_USD and wallet and (wallet, token) not in alerted:
+                                alerted.add((wallet, token))
                                 msg = (
-                                    f"🚨🔥 <b>رصد صفقة جديدة (Debot)</b>\n\n"
+                                    f"🚨👛 <b>رصد شراء محفظة جديدة (Debot Tracker)</b>\n\n"
                                     f"🌐 الشبكة: {net.upper()}\n"
                                     f"🪙 التوكن: {html.escape(name)}\n"
-                                    f"💧 السيولة: ${liq:,.0f}\n"
-                                    f"💰 الشراء: ${usd:,.0f}\n\n"
-                                    f"🔑 العقد:\n<code>{token}</code>\n\n"
-                                    f"🤖 <a href='https://debots.io'>Debot</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
+                                    f"💰 حجم شراء المحفظة: ${usd:,.0f}\n"
+                                    f"💧 السيولة: ${liq:,.0f}\n\n"
+                                    f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
+                                    f"👛 عنوان المحفظة:\n<code>{wallet}</code>\n\n"
+                                    f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
                                 )
                                 tg(msg)
                                 break
             
-            last_status = f"Idle. Checked {total_checked} pools."
-            print(f"[*] Cycle finished. Sleeping for {REFRESH}s...")
+            last_status = f"Idle. Tracked pools: {total_checked}."
             time.sleep(REFRESH)
             
         except Exception as e:
             last_status = f"Error: {str(e)}"
-            print("[!] Critical loop error:", e)
+            print("[!] Loop error:", e)
             time.sleep(10)
 
 if __name__ == "__main__":
