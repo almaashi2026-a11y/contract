@@ -4,19 +4,21 @@ import html
 import threading
 import requests
 from datetime import datetime
+from collections import defaultdict
 from flask import Flask, render_template_string
 
 TG_TOKEN = os.environ.get("TG_TOKEN", "")
 TG_CHAT = os.environ.get("TG_CHAT", "")
 NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 
-MIN_BUY_USD = 1000             # تم رفع الحد الأدنى إلى 1000 دولار للتركيز على الشراء القوي والحيتان فقط
-MIN_LIQ = 1000                 # رفع الحد الأدنى للسيولة لتجنب التوكنات الضعيفة
-MAX_MC = 10000000              
+MIN_BUY_USD = 2000             # الحد الأدنى لشراء الحوت الواحد
+MIN_LIQ = 2000                 # سيولة مناسبة للتوكنات الناشئة
+MAX_MC = 8000000               # قيمة سوقية منخفضة إلى متوسطة لضمان فرص الصعود المبكر
 REFRESH = 15                   
 CALL_GAP = 1.0
 
-alerted = set()
+wallet_accumulation = defaultdict(lambda: {"tokens": set(), "total_usd": 0, "tx_count": 0})
+alerted_accumulations = set()
 recent_alerts = []             
 _last = [0.0]
 last_status = "Starting..."
@@ -28,7 +30,7 @@ HTML_TEMPLATE = """
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Debot Live Whale Tracker - لوحة رادار الحيتان</title>
+    <title>Debot Smart Money & Early Accumulation Tracker</title>
     <meta http-equiv="refresh" content="10">
     <style>
         body { background-color: #0d1117; color: #c9d1d9; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
@@ -37,6 +39,7 @@ HTML_TEMPLATE = """
         .stats { background: #161b22; padding: 15px 20px; border-radius: 8px; margin-bottom: 25px; display: flex; justify-content: space-around; border: 1px solid #30363d; flex-wrap: wrap; gap: 10px; }
         .stats div { font-size: 1.05em; }
         .stats span { color: #3fb950; font-weight: bold; }
+        table { width: 100%
         table { width: 100%; border-collapse: collapse; background: #161b22; border-radius: 8px; overflow: hidden; border: 1px solid #30363d; }
         th, td { padding: 12px 15px; text-align: right; border-bottom: 1px solid #30363d; font-size: 0.9em; }
         th { background: #21262d; color: #58a6ff; }
@@ -51,16 +54,16 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>🚀 لوحة رادار Debot للحيتان والصفقات الكبرى</h1>
-    <div class="subtitle">مصفى على الصفقات التي تبدأ من $1,000 فصاعداً (تحديث تلقائي كل 10 ثوانٍ)</div>
+    <h1>🎯 رادار تتبع تجمع المحافظ الكبرى (Early Whale Accumulation)</h1>
+    <div class="subtitle">رصد التوجه المبكر للحيتان والسيولة الذكية قبل الصعود (تحديث تلقائي كل 10 ثوانٍ)</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي الصفقات الكبرى: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي إشارات التراكم: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول صفقات الحيتان والمحافظ الثقيلة:</h2>
+    <h2>📊 جدول التوجه المبكر للمحافظ الثقيلة:</h2>
     <table>
         <thead>
             <tr>
@@ -69,7 +72,7 @@ HTML_TEMPLATE = """
                 <th>التوكن</th>
                 <th>حجم الشراء القوي</th>
                 <th>السيولة</th>
-                <th>المحفظة</th>
+                <th>المحفظة الذكية</th>
                 <th>العقد (CA)</th>
                 <th>أدوات الفحص والتحليل</th>
             </tr>
@@ -83,12 +86,12 @@ HTML_TEMPLATE = """
                 <td class="price">${{ "{:,.0f}".format(item.usd) }}</td>
                 <td>${{ "{:,.0f}".format(item.liq) }}</td>
                 <td>
-                    <button class="copy-btn" onclick="copyText('{{ item.wallet }}', 'تم نسخ عنوان المحفظة!')" title="انقر لنسخ المحفظة">
+                    <button class="copy-btn" onclick="copyText('{{ item.wallet }}', 'تم نسخ المحفظة!')" title="انقر لنسخ المحفظة">
                         {{ item.wallet[:6] }}...{{ item.wallet[-4:] }} 📋
                     </button>
                 </td>
                 <td>
-                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ عقد التوكن (CA)!')" title="انقر لنسخ العقد">
+                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ العقد!')" title="انقر لنسخ العقد">
                         {{ item.token[:6] }}...{{ item.token[-4:] }} 📋
                     </button>
                 </td>
@@ -100,7 +103,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="8" style="text-align: center; color: #8b949e; padding: 30px;">جاري ترصد الصفقات الكبرى ($1000+) في البولات... انتظر قليلاً لحين رصد أول حوت.</td>
+                <td colspan="8" style="text-align: center; color: #8b949e; padding: 30px;">جاري ترصد توجهات الحيتان ومحفظة التراكم المبكر... انتظر رصد أول إشارة.</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -142,10 +145,10 @@ def home():
 
 @web.route("/health")
 def health():
-    return f"OK - {last_status} | Whale Alerts: {len(recent_alerts)}"
+    return f"OK - {last_status} | Signals: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM WHALE ALERT]:", msg[:60])
+    print("[TELEGRAM ACCUMULATION ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
         print("[!] Telegram credentials missing!")
         return
@@ -176,14 +179,14 @@ def gt(path, **p):
 
 def main_loop():
     global last_status, recent_alerts
-    print("[*] Debot Whale Tracker started.")
-    tg("🐋 **رادار تتبع الحيتان والصفقات الكبرى ($1000+) بدأ العمل بنجاح!**")
+    print("[*] Smart Money & Early Accumulation Tracker started.")
+    tg("🎯 **رادار التوجه المبكر وتراكم الحيتان (Smart Money) بدأ العمل!**")
     
     while True:
         try:
             total_checked = 0
             for net in NETWORKS:
-                last_status = f"جاري فحص شبكة {net.upper()} للحيتان..."
+                last_status = f"فحص التوجه المبكر على شبكة {net.upper()}..."
                 j = gt(f"/networks/{net}/trending_pools")
                 items = (j or {}).get("data", [])
                 
@@ -209,39 +212,47 @@ def main_loop():
                             token = ta.get("to_token_address")
                             wallet = ta.get("tx_from_address")
                             
-                            # الفلترة الصارمة للصفقات الكبرى فقط
-                            if usd >= MIN_BUY_USD and wallet and (wallet, token) not in alerted:
-                                alerted.add((wallet, token))
+                            if usd >= MIN_BUY_USD and wallet and token:
+                                # تتبع تراكم المحفظة
+                                w_data = wallet_accumulation[wallet]
+                                w_data["total_usd"] += usd
+                                w_data["tx_count"] += 1
+                                w_data["tokens"].add(token)
                                 
-                                alert_item = {
-                                    "time": datetime.now().strftime("%H:%M:%S"),
-                                    "net": net.upper(),
-                                    "net_raw": net,
-                                    "name": name,
-                                    "usd": usd,
-                                    "liq": liq,
-                                    "wallet": wallet,
-                                    "token": token,
-                                    "pool_addr": addr
-                                }
-                                recent_alerts.insert(0, alert_item)
-                                if len(recent_alerts) > 50:
-                                    recent_alerts.pop()
-                                
-                                msg = (
-                                    f"🐋🔥 <b>رصد صفقة حوت كبرى (Debot Whale Tracker)</b>\n\n"
-                                    f"🌐 الشبكة: {net.upper()}\n"
-                                    f"🪙 التوكن: {html.escape(name)}\n"
-                                    f"💰 حجم الشراء القوي: <b>${usd:,.0f}</b>\n"
-                                    f"💧 السيولة: ${liq:,.0f}\n\n"
-                                    f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
-                                    f"👛 عنوان المحفظة الثقيلة:\n<code>{wallet}</code>\n\n"
-                                    f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
-                                )
-                                tg(msg)
-                                break
+                                # إذا كانت المحفظة تجمع في هذا التوكن أو قامت بضخ مبكر قوي ولم ننبه عنه بعد
+                                key = (wallet, token)
+                                if key not in alerted_accumulations:
+                                    alerted_accumulations.add(key)
+                                    
+                                    alert_item = {
+                                        "time": datetime.now().strftime("%H:%M:%S"),
+                                        "net": net.upper(),
+                                        "net_raw": net,
+                                        "name": name,
+                                        "usd": usd,
+                                        "liq": liq,
+                                        "wallet": wallet,
+                                        "token": token,
+                                        "pool_addr": addr
+                                    }
+                                    recent_alerts.insert(0, alert_item)
+                                    if len(recent_alerts) > 50:
+                                        recent_alerts.pop()
+                                    
+                                    msg = (
+                                        f"🎯⚡ <b>رصد دخول مبكر لحوت / محفظة ذكية (Smart Money)</b>\n\n"
+                                        f"🌐 الشبكة: {net.upper()}\n"
+                                        f"🪙 التوكن: {html.escape(name)}\n"
+                                        f"💰 حجم الشراء المبكر: <b>${usd:,.0f}</b>\n"
+                                        f"💧 سيولة البول: ${liq:,.0f}\n\n"
+                                        f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
+                                        f"👛 المحفظة المتراكمة:\n<code>{wallet}</code>\n\n"
+                                        f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
+                                    )
+                                    tg(msg)
+                                    break
             
-            last_status = f"يعمل بنجاح - تم فحص {total_checked} بول بحثاً عن الحيتان."
+            last_status = f"يعمل بكفاءة - تم فحص {total_checked} بول لتوجهات الحيتان."
             time.sleep(REFRESH)
             
         except Exception as e:
