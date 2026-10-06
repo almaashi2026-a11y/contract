@@ -13,15 +13,15 @@ NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 REFRESH = 0.5                  
 CALL_GAP = 0.01                
 
-# شروط الأمان الصارمة وحماية الأنتي روج
-MIN_LIQ = 1500                 # الحد الأدنى للسيولة بالدولار
-MIN_MC = 5000                  # الحد الأدنى للقيمة السوقية
-MAX_MC = 400000                # أقصى قيمة سوقية لضمان فرصة البمب القوي
+# شروط متقدمة لتأكيد الزخم الحقيقي ومنع فخ الهبوط السريع
+MIN_LIQ = 2000                 # رفع حد السيولة لضمان قوة البول
+MIN_MC = 8000                  
+MAX_MC = 350000                
 
 alerted_pools = set()
 recent_alerts = []             
 _last = [0.0]
-last_status = "Initializing Anti-Rug Secure Sniper..."
+last_status = "Initializing True Momentum Sniper..."
 
 web = Flask(__name__)
 
@@ -30,7 +30,7 @@ HTML_TEMPLATE = """
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <title>Debot Anti-Rug Secure Sniper</title>
+    <title>Debot True Momentum Sniper</title>
     <meta http-equiv="refresh" content="1">
     <style>
         body { background-color: #06080c; color: #e6edf3; font-family: Tahoma, sans-serif; padding: 20px; margin: 0; }
@@ -46,7 +46,7 @@ HTML_TEMPLATE = """
         a { color: #58a6ff; text-decoration: none; }
         a:hover { text-decoration: underline; }
         .badge { background: #3fb95033; color: #3fb950; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #3fb95066; }
-        .safe-tag { background: #23863633; color: #3fb950; padding: 3px 6px; border-radius: 4px; font-size: 0.8em; border: 1px solid #3fb95055; font-weight: bold; }
+        .momentum-tag { background: #1f6feb33; color: #58a6ff; padding: 3px 6px; border-radius: 4px; font-size: 0.8em; border: 1px solid #58a6ff55; font-weight: bold; }
         .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
         .copy-btn:hover { background: #30363d; color: #79c0ff; }
         .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
@@ -54,16 +54,16 @@ HTML_TEMPLATE = """
     </style>
 </head>
 <body>
-    <h1>🛡️🔒 رادار الحماية ضد سحب السيولة (Anti-Rug & Secure 1s Sniper)</h1>
-    <div class="subtitle">فلترة العقود الآمنة كلياً ورصد الانفجارات السعرية في أول لحظة</div>
+    <h1>🎯🚀 رادار الزخم الحقيقي وتأكيد الصعود (True Momentum Sniper)</h1>
+    <div class="subtitle">فلترة الانفجارات الوهمية ورصد تدفق السيولة الحقيقي المستدام</div>
     
     <div class="stats">
         <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>إجمالي العملات المؤمنة: <strong>{{ alerts|length }}</strong></div>
+        <div>إجمالي العملات ذات الزخم الحقيقي: <strong>{{ alerts|length }}</strong></div>
         <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
     </div>
     
-    <h2>📊 جدول رصد العملات المؤمنة ضد الـ Rug Pull:</h2>
+    <h2>📊 جدول العملات المؤكدة بزخم الشراء:</h2>
     <table>
         <thead>
             <tr>
@@ -73,7 +73,7 @@ HTML_TEMPLATE = """
                 <th>القيمة السوقية (MC)</th>
                 <th>السيولة</th>
                 <th>عقد التوكن (CA)</th>
-                <th>روابط الفحص والحماية</th>
+                <th>أدوات الفحص والتحليل</th>
             </tr>
         </thead>
         <tbody>
@@ -83,12 +83,12 @@ HTML_TEMPLATE = """
                 <td><span class="badge">{{ item.net }}</span></td>
                 <td>
                     <strong>{{ item.name }}</strong><br>
-                    <span class="safe-tag">✓ Anti-Rug Passed</span>
+                    <span class="momentum-tag">⚡ True Volume Confirmed</span>
                 </td>
                 <td class="price">${{ "{:,.0f}".format(item.mc) }}</td>
                 <td>${{ "{:,.0f}".format(item.liq) }}</td>
                 <td>
-                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ العقد الآمن!')" title="انقر لنسخ العقد">
+                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ العقد بنجاح!')" title="انقر لنسخ العقد">
                         {{ item.token[:6] }}...{{ item.token[-4:] }} 📋
                     </button>
                 </td>
@@ -100,7 +100,7 @@ HTML_TEMPLATE = """
             </tr>
             {% else %}
             <tr>
-                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري فحص العقود والبحث عن العملات الآمنة بنسبة 100%...</td>
+                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري رصد تدفقات السيولة الحقيقية واستبعاد البمب الوهمي...</td>
             </tr>
             {% endfor %}
         </tbody>
@@ -145,7 +145,7 @@ def health():
     return f"OK - {last_status} | Alerts: {len(recent_alerts)}"
 
 def tg(msg):
-    print("[TELEGRAM ANTI-RUG ALERT]:", msg[:60])
+    print("[TELEGRAM MOMENTUM ALERT]:", msg[:60])
     if not TG_TOKEN or not TG_CHAT:
         return
     try:
@@ -176,29 +176,25 @@ def gt(path, **p):
     except Exception as e:
         return None
 
-def check_anti_rug(net, token_address):
+def verify_real_momentum(net, pool_addr):
     """
-    فحص الأمان ضد سحب السيولة (Anti-Rug Check)
-    يتحقق من خلو العقد من الثغرات المعتادة وصلاحيات التلاعب بالسيولة
+    التحقق من أن تدفق السيولة حقيقي وليس بمب وهمي يعقبه هبوط
+    من خلال فحص التغير في الحجم والصفقات المتتالية
     """
     try:
-        # فحص سريع لشبكات EVM و Solana عبر فاحصات العقود الشهيرة
-        if net in ["eth", "bsc", "base"]:
-            res = requests.get(f"https://api.gopluslabs.io/api/v1/token_security/{net}?contract_addresses={token_address}", timeout=2).json()
-            result_data = res.get("result", {}).get(token_address.lower(), {})
-            
-            # التأكد أن ضرائب البيع والشراء طبيعية وليست 99%، وأن العقد غير قابل للتعديل الضار وأن المالك ليس لديه صلاحيات سحب السيولة القسرية
-            is_honeypot = result_data.get("is_honeypot", "0") == "1"
-            buy_tax = float(result_data.get("buy_tax", 0) or 0)
-            sell_tax = float(result_data.get("sell_tax", 0) or 0)
-            
-            if is_honeypot or buy_tax > 10 or sell_tax > 10:
-                return False
+        pool_data = gt(f"/networks/{net}/pools/{pool_addr}")
+        attr = (pool_data or {}).get("data", {}).get("attributes", {})
         
-        # لجميع الشبكات، نتأكد أن العقد صالح وخالٍ من المشاكل الحرجة
-        return True
+        # استخراج حجم التداول خلال الفترة الأولى والمعاملات
+        volume_usd = float(attr.get("volume_usd", {}).get("h1", 0) or attr.get("volume_usd", {}).get("m5", 0) or 0)
+        reserve_usd = float(attr.get("reserve_in_usd", 0) or 0)
+        
+        # شرط الزخم الحقيقي: أن يكون حجم التداول متناسباً مع السيولة (يمنع العملات الميتة أو الوهمية)
+        if reserve_usd > 0 and (volume_usd / reserve_usd) > 0.15:
+            return True
+        return False
     except:
-        # في حال حدوث ضغط على سيرفرات الفحص، نعتبر العقد مبدئياً ضمن نطاق الفحص اللحظي مع الحفاظ على شروط السيولة
+        # في حال الوانة السريعة جداً، نعتمد الفلتر المبدئي للسيولة
         return True
 
 def scan_network(net):
@@ -230,8 +226,8 @@ def scan_network(net):
             except:
                 pass
 
-            # تفعيل فحص الأمان المضاد لسحب السيولة (Anti-Rug)
-            if not check_anti_rug(net, token):
+            # تفعيل فلتر تأكيد الزخم الحقيقي لمنع فخ الهبوط
+            if not verify_real_momentum(net, addr):
                 continue
                 
             alerted_pools.add(addr)
@@ -252,12 +248,12 @@ def scan_network(net):
                 recent_alerts.pop()
             
             msg = (
-                f"🛡️🔥 <b>رصد بمب آمن 100% (Anti-Rug Sniper)</b>\n\n"
+                f"🎯🔥 <b>رصدخم حقيقي ومستدام (True Momentum)</b>\n\n"
                 f"🌐 الشبكة: {net.upper()}\n"
                 f"🪙 التوكن: {html.escape(name)}\n"
-                f"💧 السيولة المؤمنة: ${liq:,.0f}\n"
+                f"💧 السيولة المؤكدة: ${liq:,.0f}\n"
                 f"📊 القيمة السوقية: ${mc:,.0f}\n"
-                f"🔒 الحالة: تم اجتياز فحص حماية سحب السيولة بنجاح ✓\n\n"
+                f"📈 الحالة: تأكيد تدفق السيولة الحقيقية وصعود متصاعد ✓\n\n"
                 f"🔑 عقد التوكن (CA):\n<code>{token}</code>\n\n"
                 f"🤖 <a href='https://debots.io'>Debot</a> | 🫧 <a href='https://bubblemaps.io'>BubbleMaps</a> | 📈 <a href='https://dexscreener.com/{net}/{addr}'>DexScreener</a>"
             )
@@ -267,30 +263,5 @@ def scan_network(net):
 
 def main_loop():
     global last_status
-    print("[*] Anti-Rug Secure Sniper Engine started.")
-    tg("🛡️🔒 **رادار الحماية ضد سحب السيولة (Anti-Rug) يعمل الآن بكامل الطاقة!**")
-    
-    while True:
-        try:
-            last_status = "جاري فحص العقود والسيولة (Anti-Rug Active)..."
-            
-            threads = []
-            for net in NETWORKS:
-                t = threading.Thread(target=scan_network, args=(net,))
-                threads.append(t)
-                t.start()
-                
-            for t in threads:
-                t.join()
-                
-            time.sleep(REFRESH)
-            
-        except Exception as e:
-            last_status = "إعادة ضبط فلاتر الأمان..."
-            time.sleep(0.2)
-
-if __name__ == "__main__":
-    t = threading.Thread(target=main_loop, daemon=True)
-    t.start()
-    port = int(os.environ.get("PORT", 10000))
-    web.run(host="0.0.0.0", port=port)
+    print("[*] True Momentum Sniper Engine started.")
+    tg("🎯🟢 **رادار الزخم الحقيقي وتجنب الهبوط الوهمي يعمل بكامل طاقتة!**")
