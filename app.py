@@ -24,8 +24,7 @@ last_status = "Multi-Wallet Sniper Pro Active..."
 
 web = Flask(__name__)
 
-HTML_TEMPLATE = """
-<!DOCTYPE html>
+HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
@@ -46,36 +45,4 @@ HTML_TEMPLATE = """
         a:hover { text-decoration: underline; }
         .badge { background: #3fb95033; color: #3fb950; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #3fb95066; }
         .wallets-tag { background: #1f6feb33; color: #58a6ff; padding: 3px 6px; border-radius: 4px; font-size: 0.8em; border: 1px solid #58a6ff55; font-weight: bold; }
-        .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
-        .copy-btn:hover { background: #30363d; color: #79c0ff; }
-        .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
-        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: #fff; padding: 10px 20px; border-radius: 6px; display: none; font-weight: bold; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
-    </style>
-</head>
-<body>
-    <h1>🎯👥 رادار تراكم المحافظ المتعددة (Multi-Wallet Sniper)</h1>
-    <div class="subtitle">رصد العملات عند دخول أكثر من محفظة حقيقية قبل الارتفاع والانفجار</div>
-    
-    <div class="stats">
-        <div>حالة الرادار: <span>{{ status }}</span></div>
-        <div>الصفقات المؤكدة بمحافظ متعددة: <strong>{{ alerts|length }}</strong></div>
-        <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
-    </div>
-    
-    <h2>📊 جدول رصد تراكم السيولة الحقيقية للمحافظ:</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>الوقت</th>
-                <th>الشبكة</th>
-                <th>التوكن / حالة التراكم</th>
-                <th>القيمة السوقية (MC)</th>
-                <th>السيولة الحقيقية</th>
-                <th>عقد التوكن (CA)</th>
-                <th>روابط التحليل</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for item in alerts %}
-            <tr>
-                <td>{{ item.time }}
+        .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding
