@@ -13,15 +13,14 @@ NETWORKS = os.environ.get("NETWORKS", "solana,base,eth,bsc").split(",")
 REFRESH = 2                    
 CALL_GAP = 0.3                 
 
-# شروط رصد المحافظ المتعددة والسيولة الحقيقية المضمونة
-MIN_LIQ = 3000                 # سيولة أدنى مرتفعة لضمان العمق
+MIN_LIQ = 3000                 
 MIN_MC = 10000                 
 MAX_MC = 250000                
 
 alerted_pools = set()
 recent_alerts = []             
 _last = [0.0]
-last_status = "Multi-Wallet Accumulation Sniper Active..."
+last_status = "Multi-Wallet Sniper Pro Active..."
 
 web = Flask(__name__)
 
@@ -79,167 +78,4 @@ HTML_TEMPLATE = """
         <tbody>
             {% for item in alerts %}
             <tr>
-                <td>{{ item.time }}</td>
-                <td><span class="badge">{{ item.net }}</span></td>
-                <td>
-                    <strong>{{ item.name }}</strong><br>
-                    <span class="wallets-tag">👥 Multi-Wallet Buying Verified</span>
-                </td>
-                <td class="price">${{ "{:,.0f}".format(item.mc) }}</td>
-                <td>${{ "{:,.0f}".format(item.liq) }}</td>
-                <td>
-                    <button class="copy-btn" onclick="copyText('{{ item.token }}', 'تم نسخ العقد!')" title="انقر لنسخ العقد">
-                        {{ item.token[:6] }}...{{ item.token[-4:] }} 📋
-                    </button>
-                </td>
-                <td>
-                    <a href="https://debots.io" target="_blank">Debot</a> | 
-                    <a href="https://bubblemaps.io" target="_blank">BubbleMaps</a> | 
-                    <a href="https://dexscreener.com/{{ item.net_raw }}/{{ item.pool_addr }}" target="_blank">DexScreener</a>
-                </td>
-            </tr>
-            {% else %}
-            <tr>
-                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري مراقبة الصفقات ورصد دخول المحافظ المتعددة...</td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-
-    <div id="toast">تم النسخ بنجاح!</div>
-
-    <script>
-        function copyText(text, message) {
-            navigator.clipboard.writeText(text).then(function() {
-                showToast(message);
-            }, function(err) {
-                console.error('فشل النسخ: ', err);
-            });
-        }
-
-        function showToast(msg) {
-            var toast = document.getElementById("toast");
-            toast.innerText = msg;
-            toast.style.display = "block";
-            setTimeout(function() {
-                toast.style.display = "none";
-            }, 2000);
-        }
-    </script>
-</body>
-</html>
-"""
-
-@web.route("/")
-def home():
-    global last_status, recent_alerts
-    return render_template_string(
-        HTML_TEMPLATE, 
-        status=last_status, 
-        alerts=recent_alerts, 
-        networks=", ".join(NETWORKS).upper()
-    )
-
-@web.route("/health")
-def health():
-    return f"OK - {last_status}"
-
-def tg(msg):
-    if not TG_TOKEN or not TG_CHAT:
-        return
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-            json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML"},
-            timeout=3
-        )
-    except:
-        pass
-
-def gt(path, **p):
-    wait = CALL_GAP - (time.time() - _last[0])
-    if wait > 0:
-        time.sleep(wait)
-    _last[0] = time.time()
-    try:
-        r = requests.get(f"https://api.geckoterminal.com/api/v2{path}", params=p, timeout=4,
-                         headers={
-                             "Accept": "application/json;version=20230302",
-                             "Cache-Control": "no-cache"
-                         })
-        if r.status_code == 429:
-            time.sleep(1)
-            return None
-        return r.json() if r.status_code == 200 else None
-    except:
-        return None
-
-def verify_multi_wallet_accumulation(net, pool_addr):
-    """
-    التحقق من أن الشراء موزع على عدة محافظ حقيقية وليست محفظة المطور وحدها
-    من خلال فحص عدد الصفقات وحجم السيولة المتدفقة مقارنة بالمعاملات
-    """
-    try:
-        data = gt(f"/networks/{net}/pools/{pool_addr}/trades", page_limit=15)
-        trades = (data or {}).get("data", [])
-        
-        # استخراج عناوين المحافظ الفرعية التي قامت بالشراء (Buy Transactions)
-        buyers = set()
-        buy_volume = 0
-        
-        for t in trades:
-            attr = t.get("attributes", {})
-            kind = attr.get("kind", "")
-            if kind == "buy":
-                tx_from = attr.get("tx_from_address") or attr.get("from_address")
-                if tx_from:
-                    buyers.add(tx_from)
-                buy_volume += float(attr.get("volume_in_usd", 0) or 0)
-        
-        # الشرط الاحترافي: يجب أن يكون هناك أكثر من 3-4 محافظ مختلفة اشترت التوكن بحجم حقيقي
-        if len(buyers) >= 3:
-            return True
-            
-        return False
-    except:
-        # في حال تأخر بيانات الصفقات اللحظية جداً، نعتمد الفحص الاحترافي للسيولة الكلية
-        return True
-
-def scan_network(net):
-    global recent_alerts
-    try:
-        j = gt(f"/networks/{net}/new_pools", page=1)
-        items = (j or {}).get("data", [])
-        
-        for x in items:
-            try:
-                a = x.get("attributes", {})
-                liq = float(a.get("reserve_in_usd") or 0)
-                mc = float(a.get("fdv_usd") or 0)
-                addr = a.get("address", "")
-                name = a.get("name", "?")
-                
-                if not addr or addr in alerted_pools:
-                    continue
-                
-                if liq < MIN_LIQ or mc < MIN_MC or mc > MAX_MC:
-                    continue
-                
-                token = addr
-                relationships = x.get("relationships", {})
-                token_data = relationships.get("base_token", {}).get("data", {})
-                if token_data:
-                    token = token_data.get("id", addr).split("_")[-1]
-                
-                # **تفعيل فلتر تراكم المحافظ المتعددة الحقيقي**
-                if not verify_multi_wallet_accumulation(net, addr):
-                    continue
-                
-                alerted_pools.add(addr)
-
-                alert_item = {
-                    "time": datetime.now().strftime("%H:%M:%S"),
-                    "net": net.upper(),
-                    "net_raw": net,
-                    "name": name,
-                    "mc": mc,
+                <td>{{ item.time }}
