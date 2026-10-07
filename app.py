@@ -45,4 +45,166 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         a:hover { text-decoration: underline; }
         .badge { background: #3fb95033; color: #3fb950; padding: 3px 8px; border-radius: 4px; font-size: 0.85em; border: 1px solid #3fb95066; }
         .wallets-tag { background: #1f6feb33; color: #58a6ff; padding: 3px 6px; border-radius: 4px; font-size: 0.8em; border: 1px solid #58a6ff55; font-weight: bold; }
-        .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding
+        .copy-btn { background: #21262d; color: #58a6ff; border: 1px solid #30363d; padding: 4px 8px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
+        .copy-btn:hover { background: #30363d; color: #79c0ff; }
+        .price { color: #3fb950; font-weight: bold; font-size: 1.05em; }
+        #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #238636; color: #fff; padding: 10px 20px; border-radius: 6px; display: none; font-weight: bold; z-index: 1000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+    </style>
+</head>
+<body>
+    <h1>🎯👥 رادار تراكم المحافظ المتعددة (Multi-Wallet Sniper)</h1>
+    <div class="subtitle">رصد العملات عند دخول أكثر من محفظة حقيقية قبل الارتفاع والانفجار</div>
+    
+    <div class="stats">
+        <div>حالة الرادار: <span>{{ status }}</span></div>
+        <div>الصفقات المؤكدة بمحافظ متعددة: <strong>{{ alerts|length }}</strong></div>
+        <div>الشبكات المفعلة: <strong>{{ networks }}</strong></div>
+    </div>
+    
+    <h2>📊 جدول رصد تراكم السيولة الحقيقية للمحافظ:</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>الوقت</th>
+                <th>الشبكة</th>
+                <th>التوكن / حالة التراكم</th>
+                <th>القيمة السوقية (MC)</th>
+                <th>السيولة الحقيقية</th>
+                <th>عقد التوكن (CA)</th>
+                <th>روابط التحليل</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in alerts %}
+            <tr>
+                <td>{{ item.time }}</td>
+                <td><span class="badge">{{ item.net }}</span></td>
+                <td>
+                    <strong>{{ item.name }}</strong><br>
+                    <span class="wallets-tag">👥 Multi-Wallet Buying Verified</span>
+                </td>
+                <td class="price">${{ "{:,.0f}".format(item.mc) }}</td>
+                <td>${{ "{:,.0f}".format(item.liq) }}</td>
+                <td>
+                    <button class="copy-btn" onclick="copyText('{{ item.token }}')">نسخ العقد</button>
+                </td>
+                <td>
+                    <a href="https://debots.io" target="_blank">Debot</a> | 
+                    <a href="https://bubblemaps.io" target="_blank">BubbleMaps</a> | 
+                    <a href="https://dexscreener.com/{{ item.net_raw }}/{{ item.pool_addr }}" target="_blank">DexScreener</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="7" style="text-align: center; color: #8b949e; padding: 30px;">جاري مراقبة الصفقات ورصد دخول المحافظ المتعددة...</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div id="toast">تم النسخ بنجاح!</div>
+
+    <script>
+        function copyText(text) {
+            navigator.clipboard.writeText(text).then(function() {
+                var t = document.getElementById("toast");
+                t.style.display = "block";
+                setTimeout(function() { t.style.display = "none"; }, 2000);
+            });
+        }
+    </script>
+</body>
+</html>"""
+
+@web.route("/")
+def home():
+    global last_status, recent_alerts
+    return render_template_string(HTML_TEMPLATE, status=last_status, alerts=recent_alerts, networks=", ".join(NETWORKS).upper())
+
+@web.route("/health")
+def health():
+    return f"OK - {last_status}"
+
+def tg(msg):
+    if not TG_TOKEN or not TG_CHAT:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+            json={"chat_id": TG_CHAT, "text": msg, "parse_mode": "HTML"},
+            timeout=3
+        )
+    except:
+        pass
+
+def gt(path, **p):
+    wait = CALL_GAP - (time.time() - _last[0])
+    if wait > 0:
+        time.sleep(wait)
+    _last[0] = time.time()
+    try:
+        r = requests.get(f"https://api.geckoterminal.com/api/v2{path}", params=p, timeout=4,
+                         headers={"Accept": "application/json;version=20230302", "Cache-Control": "no-cache"})
+        if r.status_code == 429:
+            time.sleep(1)
+            return None
+        return r.json() if r.status_code == 200 else None
+    except:
+        return None
+
+def verify_multi_wallet_accumulation(net, pool_addr):
+    try:
+        data = gt(f"/networks/{net}/pools/{pool_addr}/trades")
+        trades = (data or {}).get("data", [])
+        buyers = set()
+        for t in trades:
+            attr = t.get("attributes", {})
+            if attr.get("kind", "") == "buy":
+                tx_from = attr.get("tx_from_address") or attr.get("from_address")
+                if tx_from:
+                    buyers.add(tx_from)
+        if len(buyers) >= 3:
+            return True
+        return False
+    except:
+        return True
+
+def scan_network(net):
+    global recent_alerts
+    try:
+        j = gt(f"/networks/{net}/new_pools", page=1)
+        items = (j or {}).get("data", [])
+        for x in items:
+            try:
+                a = x.get("attributes", {})
+                liq = float(a.get("reserve_in_usd") or 0)
+                mc = float(a.get("fdv_usd") or 0)
+                addr = a.get("address", "")
+                name = a.get("name", "?")
+                if not addr or addr in alerted_pools:
+                    continue
+                if liq < MIN_LIQ or mc < MIN_MC or mc > MAX_MC:
+                    continue
+                token = addr
+                relationships = x.get("relationships", {})
+                token_data = relationships.get("base_token", {}).get("data", {})
+                if token_data:
+                    token = token_data.get("id", addr).split("_")[-1]
+                if not verify_multi_wallet_accumulation(net, addr):
+                    continue
+                alerted_pools.add(addr)
+                alert_item = {
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "net": net.upper(),
+                    "net_raw": net,
+                    "name": name,
+                    "mc": mc,
+                    "liq": liq,
+                    "token": token,
+                    "pool_addr": addr
+                }
+                recent_alerts.insert(0, alert_item)
+                if len(recent_alerts) > 80:
+                    recent_alerts.pop()
+                msg = (
+                    f"🎯👥 <b>رصد تراكم محافظ متعددة (Multi-Wallet Accumulation)</b>\n\n"
