@@ -206,5 +206,36 @@ def scan_network(net):
                 recent_alerts.insert(0, alert_item)
                 if len(recent_alerts) > 80:
                     recent_alerts.pop()
-                msg = (
-                    f"🎯👥 <b>رصد تراكم محافظ متعددة (Multi-Wallet Accumulation)</b>\n\n"
+                
+                msg = "🎯👥 رصد تراكم محافظ متعددة\n\n"
+                msg += f"الشبكة: {net.upper()}\n"
+                msg += f"التوكن: {html.escape(name)}\n"
+                msg += f"السيولة: ${liq:,.0f}\n"
+                msg += f"القيمة السوقية: ${mc:,.0f}\n\n"
+                msg += f"العقد:\n<code>{token}</code>"
+                tg(msg)
+            except:
+                continue
+    except:
+        pass
+
+def main_loop():
+    global last_status
+    print("[*] Multi-Wallet Sniper Pro Engine started.")
+    tg("🎯🟢 رادار تراكم المحافظ المتعددة يعمل الآن!")
+    while True:
+        try:
+            last_status = "جاري تتبع صفقات المحافظ المتعددة..."
+            for net in NETWORKS:
+                scan_network(net.strip())
+                time.sleep(0.4)
+            time.sleep(REFRESH)
+        except:
+            last_status = "إعادة مزامنة الرادار..."
+            time.sleep(2)
+
+if __name__ == "__main__":
+    t = threading.Thread(target=main_loop, daemon=True)
+    t.start()
+    port = int(os.environ.get("PORT", 10000))
+    web.run(host="0.0.0.0", port=port)
